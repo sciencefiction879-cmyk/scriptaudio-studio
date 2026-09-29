@@ -13,6 +13,12 @@ import shutil
 import zipfile
 import subprocess
 
+# Ensure safe UTF-8 output on all Windows and Unix terminals
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DIST_DIR = os.path.join(PROJECT_ROOT, "dist")
 BUILD_DIR = os.path.join(DIST_DIR, "build_win")
@@ -44,8 +50,8 @@ def check_prerequisites():
         raise FileNotFoundError(f"7-Zip binary not found on this system. Please install 7-Zip.")
     if not os.path.exists(SFX_BIN):
         raise FileNotFoundError(f"Windows SFX module not found at {SFX_BIN}")
-    print(f"✓ Found 7-Zip: {SEVEN_ZIP}")
-    print(f"✓ Found SFX Module: {SFX_BIN}")
+    print(f"[OK] Found 7-Zip: {SEVEN_ZIP}")
+    print(f"[OK] Found SFX Module: {SFX_BIN}")
 
 def create_windows_launchers(target_dir):
     """Creates VBScript and Batch launchers for Windows."""
@@ -165,11 +171,11 @@ exit /b 0
     with open(bat_path, "w", encoding="utf-8") as f:
         f.write(bat_content)
 
-    print(f"✓ Created Windows Launchers (launcher.vbs & Run_ScriptAudio_Studio.bat)")
+    print("[OK] Created Windows Launchers (launcher.vbs & Run_ScriptAudio_Studio.bat)")
 
 def build_windows_dist():
     print("=" * 65)
-    print(f"🎙️  Building Windows Release for ScriptAudio Studio v{VERSION}")
+    print(f"[BUILD] Building Windows Release for ScriptAudio Studio v{VERSION}")
     print("=" * 65)
 
     check_prerequisites()
@@ -183,7 +189,7 @@ def build_windows_dist():
     os.makedirs(pkg_root, exist_ok=True)
 
     # 1. Copy web assets
-    print("📦 Gathering web assets...")
+    print("[PACKAGE] Gathering web assets...")
     shutil.copy2(os.path.join(PROJECT_ROOT, "index.html"), pkg_root)
     shutil.copy2(os.path.join(PROJECT_ROOT, "style.css"), pkg_root)
     shutil.copytree(os.path.join(PROJECT_ROOT, "js"), os.path.join(pkg_root, "js"))
@@ -214,7 +220,7 @@ Enjoy studio-quality Google AI voiceover production!
 """)
 
     # 4. Create Standalone Windows Executable (.exe) via 7z SFX
-    print("🔨 Compressing files into 7z payload...")
+    print("[COMPRESS] Compressing files into 7z payload...")
     payload_7z = os.path.join(BUILD_DIR, "payload.7z")
     subprocess.check_call([
         SEVEN_ZIP, "a", "-t7z", "-mx=9", "-mfb=64", "-md=32m", "-ms=on",
@@ -230,7 +236,7 @@ Enjoy studio-quality Google AI voiceover production!
     if os.path.exists(out_exe):
         os.remove(out_exe)
 
-    print(f"📦 Assembling standalone PE executable: {exe_name}...")
+    print(f"[PACKAGE] Assembling standalone PE executable: {exe_name}...")
     with open(out_exe, "wb") as dst:
         with open(SFX_BIN, "rb") as s:
             dst.write(s.read())
@@ -240,7 +246,7 @@ Enjoy studio-quality Google AI voiceover production!
             dst.write(s.read())
 
     exe_size_mb = os.path.getsize(out_exe) / (1024 * 1024)
-    print(f"✅ Created Standalone Windows Executable: {out_exe} ({exe_size_mb:.2f} MB)")
+    print(f"[SUCCESS] Created Standalone Windows Executable: {out_exe} ({exe_size_mb:.2f} MB)")
 
     # 5. Create Standalone Portable ZIP
     zip_name = f"ScriptAudioStudio-v{VERSION}-Windows-Portable.zip"
@@ -251,28 +257,28 @@ Enjoy studio-quality Google AI voiceover production!
     # Include the .exe inside the portable bundle too!
     shutil.copy2(out_exe, pkg_root)
 
-    print(f"📦 Packaging complete portable ZIP: {zip_name}...")
+    print(f"[PACKAGE] Packaging complete portable ZIP: {zip_name}...")
     subprocess.check_call([
         SEVEN_ZIP, "a", "-tzip", "-mx=9",
         out_zip, f"{pkg_root}/*"
     ])
     zip_size_mb = os.path.getsize(out_zip) / (1024 * 1024)
-    print(f"✅ Created Windows Portable ZIP: {out_zip} ({zip_size_mb:.2f} MB)")
+    print(f"[SUCCESS] Created Windows Portable ZIP: {out_zip} ({zip_size_mb:.2f} MB)")
 
     # 6. Verify PE Executable Header with file command & 7z integrity check
-    print("🔍 Running executable verification checks...")
+    print("[VERIFY] Running executable verification checks...")
     if shutil.which("file"):
         try:
             file_info = subprocess.check_output(["file", out_exe]).decode().strip()
-            print(f"  • Binary info: {file_info}")
+            print(f"  * Binary info: {file_info}")
         except Exception:
             pass
     
     test_res = subprocess.check_output([SEVEN_ZIP, "t", out_exe]).decode()
     if "Everything is Ok" in test_res:
-        print("  • Archive integrity check inside .exe: PASSED ✓")
+        print("  * Archive integrity check inside .exe: PASSED [OK]")
     else:
-        print(f"  • Warning on archive test: {test_res}")
+        print(f"  * Warning on archive test: {test_res}")
 
     # 7. Copy to Desktop if available
     if os.path.exists(DESKTOP_DIR):
@@ -281,15 +287,15 @@ Enjoy studio-quality Google AI voiceover production!
             desktop_zip = os.path.join(DESKTOP_DIR, zip_name)
             shutil.copy2(out_exe, desktop_exe)
             shutil.copy2(out_zip, desktop_zip)
-            print(f"📂 Copied to Desktop:")
-            print(f"  • {desktop_exe}")
-            print(f"  • {desktop_zip}")
+            print(f"[DESKTOP] Copied to Desktop:")
+            print(f"  * {desktop_exe}")
+            print(f"  * {desktop_zip}")
         except Exception as e:
-            print(f"  • Skipped desktop copy: {e}")
+            print(f"  * Skipped desktop copy: {e}")
 
     # Cleanup staging directory
     shutil.rmtree(BUILD_DIR)
-    print("🎉 All Windows packages successfully built and verified!")
+    print("[DONE] All Windows packages successfully built and verified!")
     return out_exe, out_zip
 
 if __name__ == "__main__":
