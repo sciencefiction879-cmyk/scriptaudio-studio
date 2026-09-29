@@ -30,6 +30,9 @@
       </div>
       
       <div class="header-actions">
+        <button id="btnThemeToggle" class="btn btn-ghost btn-icon-only" title="Toggle Light/Dark Theme">
+          <i class="fa-solid fa-moon" id="themeIcon"></i>
+        </button>
         <button id="btnVoiceGallery" class="btn btn-secondary">
           <i class="fa-solid fa-headset"></i>
           <span>Voice Artists (30)</span>
@@ -56,10 +59,15 @@
             <h2>1. Import & Configure Script</h2>
           </div>
           <div class="script-header-right">
-            <button id="btnPasteScriptHeader" class="btn btn-primary btn-sm" type="button" title="Paste script from clipboard">
+            <label for="scriptFileInput" class="btn btn-primary btn-sm btn-upload-script" id="btnUploadScriptLabel" title="Upload one or multiple .txt script files (V1, V2, V3...)">
+              <i class="fa-solid fa-cloud-arrow-up"></i> Upload Script(s)
+              <input type="file" id="scriptFileInput" multiple accept=".txt,text/plain" style="display: none;">
+            </label>
+            <button id="btnPasteScriptHeader" class="btn btn-secondary btn-sm" type="button" title="Paste script from clipboard">
               <i class="fa-solid fa-paste"></i> Paste Script
             </button>
             <div class="script-meta-badges">
+              <span class="meta-badge" id="badgeScriptsUploaded" style="display: none;"><i class="fa-solid fa-folder"></i> Scripts: <strong id="inputScriptCount">0</strong></span>
               <span class="meta-badge"><i class="fa-solid fa-font"></i> Words: <strong id="inputWordCount">0</strong></span>
               <span class="meta-badge"><i class="fa-solid fa-clock"></i> Est. Voiceover: <strong id="inputEstTime">0m 0s</strong></span>
             </div>
@@ -67,6 +75,18 @@
         </div>
 
         <div class="panel-body">
+          <!-- Session Resume Notification Banner -->
+          <div class="resume-banner" id="resumeBanner" style="display: none;">
+            <div class="resume-banner-text">
+              <i class="fa-solid fa-clock-rotate-left"></i>
+              <span>Unfinished session detected (<strong id="resumeTotalCount">0</strong> chunks, <strong id="resumeReadyCount">0</strong> ready). Continue where you left off?</span>
+            </div>
+            <div class="resume-banner-actions">
+              <button id="btnResumeSession" class="btn btn-primary btn-sm" type="button"><i class="fa-solid fa-play"></i> Resume</button>
+              <button id="btnDiscardSession" class="btn btn-ghost btn-sm" type="button"><i class="fa-solid fa-trash-can"></i> Discard</button>
+            </div>
+          </div>
+
           <!-- AI Studio Vocal Tags & Quick Action Bar -->
           <div class="script-toolbar">
             <div class="toolbar-left">
@@ -85,6 +105,26 @@
                 <button type="button" class="btn-tag" data-tag="<gasp>" title="Insert gasp or shock">😲 &lt;gasp&gt;</button>
                 <button type="button" class="btn-tag" data-tag="<emphasis>" data-close="</emphasis>" title="Emphasize key words">💡 &lt;emphasis&gt;</button>
               </div>
+            </div>
+          </div>
+
+          <!-- Uploaded Scripts Verification Tray (V1, V2, V3...) -->
+          <div id="uploadedScriptsTray" class="uploaded-scripts-tray" style="display: none;">
+            <div class="tray-header">
+              <div class="tray-title">
+                <i class="fa-solid fa-layer-group"></i>
+                <span>Uploaded Scripts (<strong id="uploadedScriptsCount">0</strong>)</span>
+                <span class="tray-badge" id="uploadedTotalWords">0 total words</span>
+                <span class="tray-hint">Click any script to verify &amp; edit in editor:</span>
+              </div>
+              <div class="tray-actions">
+                <button type="button" class="btn btn-ghost btn-xs" id="btnClearUploadedScripts" title="Remove all uploaded scripts">
+                  <i class="fa-solid fa-trash-can"></i> Clear All
+                </button>
+              </div>
+            </div>
+            <div class="tray-scripts-pills" id="uploadedScriptsList">
+              <!-- Dynamically populated script tabs e.g. [ V1 • 320w × ] [ V2 • 610w × ] -->
             </div>
           </div>
 
@@ -212,10 +252,10 @@
             </div>
 
             <div class="config-group" id="limitGroup">
-              <label for="chunkLimit"><i class="fa-solid fa-sliders"></i> Target Size Per Chunk</label>
+              <label for="chunkLimit"><i class="fa-solid fa-scissors"></i> Target Size Per Chunk</label>
               <div class="range-with-val">
-                <input type="range" id="chunkLimit" min="100" max="600" step="25" value="250">
-                <span id="chunkLimitValue" class="value-tag">250 words (~1.5 mins)</span>
+                <input type="range" id="chunkLimit" min="300" max="2000" step="50" value="1500">
+                <span id="chunkLimitValue" class="value-tag">1500 words (~10.0 mins)</span>
               </div>
             </div>
 
@@ -248,8 +288,12 @@
 
           <div class="action-toolbar">
             <button id="btnSplit" class="btn btn-primary btn-lg">
-              <i class="fa-solid fa-wand-magic-sparkles"></i> Split Script into Chunks
+              <i class="fa-solid fa-scissors"></i> <span id="btnSplitText">Divide Script into Chunks</span>
             </button>
+            <label class="auto-gen-toggle" title="Automatically start generating audio after splitting">
+              <input type="checkbox" id="autoGenerateToggle">
+              <span class="auto-gen-label"><i class="fa-solid fa-bolt"></i> Auto Generate</span>
+            </label>
             <button id="btnClear" class="btn btn-ghost">
               <i class="fa-solid fa-trash-can"></i> Clear Input
             </button>
@@ -288,6 +332,14 @@
             </div>
           </div>
 
+          <!-- Live Generation Stats -->
+          <div id="liveGenStats" class="live-gen-stats" style="display: none;">
+            <div class="gen-stat"><i class="fa-solid fa-spinner fa-spin"></i> <span id="genStatActive">0</span> Active</div>
+            <div class="gen-stat"><i class="fa-solid fa-check" style="color:var(--success)"></i> <span id="genStatDone">0</span> Done</div>
+            <div class="gen-stat"><i class="fa-solid fa-xmark" style="color:var(--danger)"></i> <span id="genStatFailed">0</span> Failed</div>
+            <div class="gen-stat"><i class="fa-solid fa-clock"></i> ETA: <span id="genStatEta">--</span></div>
+          </div>
+
           <!-- Master Action Bar -->
           <div class="master-action-bar">
             <div class="bulk-btns">
@@ -297,12 +349,26 @@
               <button id="btnGenerateAllApi" class="btn btn-accent" style="display: none;">
                 <i class="fa-solid fa-bolt"></i> Generate All via API
               </button>
-              <button id="btnDownloadAllAudio" class="btn btn-secondary" title="Download all ready voiceover clips">
-                <i class="fa-solid fa-cloud-arrow-down"></i> Download All Audio
+              <button id="btnPauseGeneration" class="btn btn-secondary" style="display: none;" title="Pause generation">
+                <i class="fa-solid fa-pause"></i> Pause
               </button>
+              <button id="btnRetryFailed" class="btn btn-secondary" style="display: none;" title="Retry all failed chunks">
+                <i class="fa-solid fa-rotate-right"></i> Retry Failed
+              </button>
+              <button id="btnDownloadAllAudio" class="btn btn-secondary" title="Download all ready voiceover clips in a ZIP file">
+                <i class="fa-solid fa-file-zipper"></i> Download All (ZIP)
+              </button>
+              <select id="downloadFormatSelect" class="download-format-select" title="Audio download format">
+                <option value="wav">WAV (Lossless)</option>
+                <option value="mp3">MP3 (Smaller)</option>
+              </select>
               <button id="btnExportJson" class="btn btn-ghost">
                 <i class="fa-solid fa-file-export"></i> Export JSON Project
               </button>
+              <label for="importJsonInput" class="btn btn-ghost" title="Import a previously exported project">
+                <i class="fa-solid fa-file-import"></i> Import JSON
+                <input type="file" id="importJsonInput" accept=".json" style="display: none;">
+              </label>
             </div>
 
             <div class="quick-config-badge-bar">
@@ -321,6 +387,12 @@
               <div class="config-pill" id="quickMultiSpeakerPill" title="Multi-Speaker Dialogue Mode" style="display: none;">
                 <i class="fa-solid fa-people-arrows"></i>
                 <span id="quickMultiSpeakerLabel">Dual: Puck</span>
+              </div>
+              <div class="config-pill worker-config" id="workerCountPill" title="Max parallel API workers">
+                <i class="fa-solid fa-server"></i>
+                <label for="workerCountSlider">Workers:</label>
+                <input type="range" id="workerCountSlider" min="1" max="10" step="1" value="4" class="mini-slider">
+                <span id="workerCountValue">4</span>
               </div>
               <button id="btnQuickConfig" class="btn btn-sm btn-ghost" type="button" title="Configure Model, Voice & Parameters">
                 <i class="fa-solid fa-sliders"></i> Settings
@@ -353,8 +425,11 @@
         <div class="chunk-search-bar">
           <div class="search-input-wrapper">
             <i class="fa-solid fa-magnifying-glass"></i>
-            <input type="text" id="chunkSearch" placeholder="Filter chunks by text...">
+            <input type="text" id="chunkSearch" placeholder="Filter chunks by text or name...">
           </div>
+          <select id="scriptFilterSelect" class="script-filter-select" style="display: none;" title="Filter chunks by script">
+            <option value="all">All Scripts</option>
+          </select>
           <div class="filter-pills">
             <button class="pill active" data-filter="all">All (<span id="countFilterAll">0</span>)</button>
             <button class="pill" data-filter="pending">Pending Audio (<span id="countFilterPending">0</span>)</button>
@@ -568,13 +643,27 @@
       </div>
     </div>
 
+    <!-- Keyboard Shortcuts Hint -->
+    <div class="keyboard-shortcuts-bar" id="keyboardShortcutsBar">
+      <span><kbd>Ctrl</kbd>+<kbd>S</kbd> Split</span>
+      <span><kbd>Ctrl</kbd>+<kbd>G</kbd> Generate</span>
+      <span><kbd>Ctrl</kbd>+<kbd>D</kbd> Download</span>
+      <span><kbd>Ctrl</kbd>+<kbd>J</kbd> Stitch</span>
+      <span><kbd>Ctrl</kbd>+<kbd>T</kbd> Theme</span>
+    </div>
+
   </div>
 
   <!-- Application Scripts -->
+  <script src="js/jszip.min.js"></script>
+  <script src="js/lame.min.js"></script>
   <script src="js/voices-data.js"></script>
   <script src="js/chunker.js"></script>
   <script src="js/ai-studio.js"></script>
   <script src="js/audio-stitcher.js"></script>
+  <script src="js/bulk-storage.js"></script>
+  <script src="js/bulk-stitcher.js"></script>
+  <script src="js/bulk-dispatcher.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

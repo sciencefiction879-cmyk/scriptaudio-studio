@@ -956,6 +956,89 @@ const AIStudio = {
   },
 
   /**
+   * Dedicated single-worker generation with a specific assigned API key
+   * Used by the Parallel Bulk Dispatcher
+   */
+  async generateAudioWithSpecificKey(chunkText, voiceName, modelName, specificKey, customInstruction = '') {
+    if (!specificKey) {
+      throw new Error('API Key is missing for worker.');
+    }
+
+    const selectedVoice = voiceName || this.getVoice();
+    const selectedModel = modelName || this.getModel();
+    const promptDirective = customInstruction || this.getPromptInstruction();
+
+    let cleanSpeechText = (chunkText || '').trim();
+    if (promptDirective && !cleanSpeechText.startsWith(promptDirective)) {
+      cleanSpeechText = `${promptDirective}\n\n${cleanSpeechText}`;
+    }
+
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(selectedModel)}:generateContent?key=${encodeURIComponent(specificKey)}`;
+
+    const contents = [
+      {
+        role: "user",
+        parts: [{ text: cleanSpeechText }]
+      }
+    ];
+
+    const speechConfig = {
+      voiceConfig: {
+        prebuiltVoiceConfig: {
+          voiceName: selectedVoice
+        }
+      }
+    };
+
+    const generationConfig = {
+      responseModalities: ["AUDIO"],
+      speechConfig: speechConfig,
+      temperature: this.getTemperature(),
+      topP: this.getTopP(),
+      topK: this.getTopK()
+    };
+
+    const seed = this.getSeed();
+    if (seed !== null && !isNaN(seed)) {
+      generationConfig.seed = seed;
+    }
+
+    const payload = {
+      contents: contents,
+      generationConfig: generationConfig
+    };
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      const errorMsg = data.error?.message || `HTTP ${response.status}`;
+      const err = new Error(errorMsg);
+      err.status = response.status;
+      err.isRateLimit = response.status === 429 || response.status === 403 || 
+                        errorMsg.toLowerCase().includes('quota') || 
+                        errorMsg.toLowerCase().includes('rate') ||
+                        errorMsg.toLowerCase().includes('resource_exhausted');
+      throw err;
+    }
+
+    const inlineData = data.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData;
+    if (inlineData && inlineData.data) {
+      return this.processAudioResponse(inlineData);
+    }
+
+    const blockReason = data.promptFeedback?.blockReason || data.candidates?.[0]?.finishReason;
+    throw new Error(`API response did not include binary audio data${blockReason ? ` (${blockReason})` : ''}.`);
+  },
+
+  /**
    * Convert Gemini API Inline Audio Data (PCM or Encoded) into a standard Playable Blob
    */
   processAudioResponse(inlineData) {

@@ -20,15 +20,37 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
   const state = {
     chunks: [],
     filter: 'all',
+    scriptFilter: 'all',
     searchQuery: '',
     masterAudioBlob: null,
-    masterAudioUrl: null
+    masterAudioUrl: null,
+    uploadedScripts: [], // Array of { id: 'V1', filename: '...', text: '...', words: 350, chars: 1800 }
+    activeScriptId: null,
+    // Generation control
+    generationPaused: false,
+    generationRunning: false,
+    generationAborted: false,
+    genStats: { active: 0, done: 0, failed: 0, startTime: 0 },
+    // UI preferences
+    collapsedChunks: new Set(),
+    theme: localStorage.getItem('sa_theme') || 'dark'
   };
 
   // DOM Elements
   const scriptInput = document.getElementById('scriptInput');
   const inputWordCount = document.getElementById('inputWordCount');
   const inputEstTime = document.getElementById('inputEstTime');
+  const scriptFileInput = document.getElementById('scriptFileInput');
+  const uploadedScriptsTray = document.getElementById('uploadedScriptsTray');
+  const uploadedScriptsCount = document.getElementById('uploadedScriptsCount');
+  const uploadedTotalWords = document.getElementById('uploadedTotalWords');
+  const uploadedScriptsList = document.getElementById('uploadedScriptsList');
+  const btnClearUploadedScripts = document.getElementById('btnClearUploadedScripts');
+  const badgeScriptsUploaded = document.getElementById('badgeScriptsUploaded');
+  const inputScriptCount = document.getElementById('inputScriptCount');
+  const btnSplitText = document.getElementById('btnSplitText');
+  const scriptFilterSelect = document.getElementById('scriptFilterSelect');
+
   const chunkMode = document.getElementById('chunkMode');
   const chunkLimit = document.getElementById('chunkLimit');
   const chunkLimitValue = document.getElementById('chunkLimitValue');
@@ -66,6 +88,27 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
   const countFilterReady = document.getElementById('countFilterReady');
 
   const dragOverlay = document.getElementById('dragOverlay');
+
+  // New Feature DOM Refs
+  const btnThemeToggle = document.getElementById('btnThemeToggle');
+  const themeIcon = document.getElementById('themeIcon');
+  const btnPauseGeneration = document.getElementById('btnPauseGeneration');
+  const btnRetryFailed = document.getElementById('btnRetryFailed');
+  const workerCountSlider = document.getElementById('workerCountSlider');
+  const workerCountValue = document.getElementById('workerCountValue');
+  const autoGenerateToggle = document.getElementById('autoGenerateToggle');
+  const importJsonInput = document.getElementById('importJsonInput');
+  const downloadFormatSelect = document.getElementById('downloadFormatSelect');
+  const liveGenStats = document.getElementById('liveGenStats');
+  const genStatActive = document.getElementById('genStatActive');
+  const genStatDone = document.getElementById('genStatDone');
+  const genStatFailed = document.getElementById('genStatFailed');
+  const genStatEta = document.getElementById('genStatEta');
+  const resumeBanner = document.getElementById('resumeBanner');
+  const resumeTotalCount = document.getElementById('resumeTotalCount');
+  const resumeReadyCount = document.getElementById('resumeReadyCount');
+  const btnResumeSession = document.getElementById('btnResumeSession');
+  const btnDiscardSession = document.getElementById('btnDiscardSession');
 
   // Modal & Model/Voice DOM
   const btnSettings = document.getElementById('btnSettings');
@@ -167,7 +210,195 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
 
   // Initialize Settings & UI
   initSettings();
+  scriptInput.value = ''; // Ensure default empty script box on initial load
   updateInputStats();
+  renderUploadedScriptsTray();
+  applyTheme(state.theme);
+  restoreAutoSave();
+  startAutoSaveInterval();
+
+
+  // --- Bulk Script Import & V-Number Management ---
+  function parseVNumber(filename, fallbackIndex = 1) {
+    const clean = filename.trim();
+    const vMatch = clean.match(/(?:^|[\s_.-])[vV][-_]?(\d+)(?:[\s_.-]|$)/);
+    if (vMatch) return 'V' + parseInt(vMatch[1], 10);
+    const leadV = clean.match(/^[vV](\d+)/);
+    if (leadV) return 'V' + parseInt(leadV[1], 10);
+    const numMatch = clean.match(/^(\d+)[\s_.-]/);
+    if (numMatch) return 'V' + parseInt(numMatch[1], 10);
+    return 'V' + fallbackIndex;
+  }
+
+  async function handleImportScriptFiles(files) {
+    if (!files || files.length === 0) return;
+    const txtFiles = files.filter(f => f.name.match(/\.(txt|md|text)$/i) || f.type.startsWith('text/'));
+    if (txtFiles.length === 0) {
+      showToast('Please select text (.txt) script files!', 'warning');
+      return;
+    }
+
+    let addedCount = 0;
+    for (let i = 0; i < txtFiles.length; i++) {
+      const file = txtFiles[i];
+      try {
+        const text = await file.text();
+        if (!text || !text.trim()) continue;
+
+        const fallbackIdx = state.uploadedScripts.length + 1;
+        const vId = parseVNumber(file.name, fallbackIdx);
+        const stats = Chunker.getStats(text);
+
+        const existingIdx = state.uploadedScripts.findIndex(s => s.id === vId);
+        const scriptRecord = {
+          id: vId,
+          filename: file.name,
+          text: text.trim(),
+          words: stats.words,
+          chars: stats.chars,
+          durationFormatted: stats.durationFormatted
+        };
+
+        if (existingIdx >= 0) {
+          state.uploadedScripts[existingIdx] = scriptRecord;
+        } else {
+          state.uploadedScripts.push(scriptRecord);
+        }
+        addedCount++;
+      } catch (err) {
+        console.error('Error reading script file:', file.name, err);
+      }
+    }
+
+    if (addedCount > 0) {
+      state.uploadedScripts.sort((a, b) => {
+        const numA = parseInt(a.id.replace(/\D/g, ''), 10) || 0;
+        const numB = parseInt(b.id.replace(/\D/g, ''), 10) || 0;
+        return numA - numB;
+      });
+
+      if (!state.activeScriptId || !state.uploadedScripts.some(s => s.id === state.activeScriptId)) {
+        state.activeScriptId = state.uploadedScripts[0].id;
+      }
+
+      const activeScript = state.uploadedScripts.find(s => s.id === state.activeScriptId);
+      if (activeScript) {
+        scriptInput.value = activeScript.text;
+      }
+
+      renderUploadedScriptsTray();
+      updateInputStats();
+      showToast(`Imported ${addedCount} script(s) successfully! You can verify each one in the tray.`, 'success');
+    }
+  }
+
+  function renderUploadedScriptsTray() {
+    if (!uploadedScriptsTray) return;
+
+    const count = state.uploadedScripts.length;
+    if (count === 0) {
+      uploadedScriptsTray.style.display = 'none';
+      if (badgeScriptsUploaded) badgeScriptsUploaded.style.display = 'none';
+      if (btnSplitText) btnSplitText.textContent = 'Divide Script into Chunks';
+      return;
+    }
+
+    uploadedScriptsTray.style.display = 'block';
+    if (badgeScriptsUploaded) {
+      badgeScriptsUploaded.style.display = 'inline-flex';
+      if (inputScriptCount) inputScriptCount.textContent = count;
+    }
+
+    if (uploadedScriptsCount) uploadedScriptsCount.textContent = count;
+    const totalWords = state.uploadedScripts.reduce((sum, s) => sum + s.words, 0);
+    if (uploadedTotalWords) uploadedTotalWords.textContent = totalWords.toLocaleString() + ' words total';
+
+    if (btnSplitText) {
+      btnSplitText.textContent = count > 1 
+        ? `Divide All Scripts into Chunks (${count} Scripts)` 
+        : `Divide Script (${state.uploadedScripts[0].id}) into Chunks`;
+    }
+
+    if (uploadedScriptsList) {
+      uploadedScriptsList.innerHTML = '';
+      state.uploadedScripts.forEach(script => {
+        const pill = document.createElement('div');
+        pill.className = `script-tab-pill ${script.id === state.activeScriptId ? 'active' : ''}`;
+        pill.setAttribute('data-id', script.id);
+        pill.innerHTML = `
+          <span class="pill-vname">${escapeHtml(script.id)}</span>
+          <span class="pill-meta">${script.words}w</span>
+          <button type="button" class="btn-remove-pill" title="Remove ${escapeHtml(script.id)}">×</button>
+        `;
+
+        pill.addEventListener('click', (e) => {
+          if (e.target.classList.contains('btn-remove-pill')) return;
+          selectUploadedScript(script.id);
+        });
+
+        const removeBtn = pill.querySelector('.btn-remove-pill');
+        if (removeBtn) {
+          removeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            removeUploadedScript(script.id);
+          });
+        }
+
+        uploadedScriptsList.appendChild(pill);
+      });
+    }
+  }
+
+  function selectUploadedScript(scriptId) {
+    state.activeScriptId = scriptId;
+    const script = state.uploadedScripts.find(s => s.id === scriptId);
+    if (script) {
+      scriptInput.value = script.text;
+      updateInputStats();
+      renderUploadedScriptsTray();
+      scriptInput.focus();
+    }
+  }
+
+  function removeUploadedScript(scriptId) {
+    const idx = state.uploadedScripts.findIndex(s => s.id === scriptId);
+    if (idx >= 0) {
+      state.uploadedScripts.splice(idx, 1);
+      if (state.activeScriptId === scriptId) {
+        state.activeScriptId = state.uploadedScripts.length > 0 ? state.uploadedScripts[0].id : null;
+        if (state.activeScriptId) {
+          const nextScript = state.uploadedScripts.find(s => s.id === state.activeScriptId);
+          scriptInput.value = nextScript ? nextScript.text : '';
+        } else {
+          scriptInput.value = '';
+        }
+      }
+      renderUploadedScriptsTray();
+      updateInputStats();
+      showToast(`Removed script ${scriptId}`, 'info');
+    }
+  }
+
+  function syncActiveScriptFromInput() {
+    if (state.activeScriptId && state.uploadedScripts.length > 0) {
+      const activeScript = state.uploadedScripts.find(s => s.id === state.activeScriptId);
+      if (activeScript) {
+        activeScript.text = scriptInput.value;
+        const stats = Chunker.getStats(scriptInput.value);
+        activeScript.words = stats.words;
+        activeScript.chars = stats.chars;
+        activeScript.durationFormatted = stats.durationFormatted;
+
+        const totalWords = state.uploadedScripts.reduce((sum, s) => sum + s.words, 0);
+        if (uploadedTotalWords) uploadedTotalWords.textContent = totalWords.toLocaleString() + ' words total';
+
+        if (uploadedScriptsList) {
+          const metaSpan = uploadedScriptsList.querySelector(`.script-tab-pill[data-id="${activeScript.id}"] .pill-meta`);
+          if (metaSpan) metaSpan.textContent = activeScript.words + 'w';
+        }
+      }
+    }
+  }
 
   // --- Event Listeners ---
 
@@ -245,8 +476,41 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
     });
   }
 
-  // Input Real-Time Stats
-  scriptInput.addEventListener('input', updateInputStats);
+  // Input Real-Time Stats & Active Script Sync
+  scriptInput.addEventListener('input', () => {
+    updateInputStats();
+    syncActiveScriptFromInput();
+  });
+
+  // Upload Script(s) file input listener
+  if (scriptFileInput) {
+    scriptFileInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files.length > 0) {
+        handleImportScriptFiles(Array.from(e.target.files));
+        scriptFileInput.value = '';
+      }
+    });
+  }
+
+  // Clear all uploaded scripts
+  if (btnClearUploadedScripts) {
+    btnClearUploadedScripts.addEventListener('click', () => {
+      state.uploadedScripts = [];
+      state.activeScriptId = null;
+      scriptInput.value = '';
+      renderUploadedScriptsTray();
+      updateInputStats();
+      showToast('Cleared all uploaded scripts', 'info');
+    });
+  }
+
+  // Workspace Script Filter dropdown
+  if (scriptFilterSelect) {
+    scriptFilterSelect.addEventListener('change', (e) => {
+      state.scriptFilter = e.target.value;
+      renderChunksList();
+    });
+  }
 
   // Split Mode dropdown toggle
   chunkMode.addEventListener('change', () => {
@@ -256,8 +520,8 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
     } else {
       limitGroup.style.display = 'flex';
       if (mode === 'words') {
-        chunkLimit.min = '100'; chunkLimit.max = '600'; chunkLimit.step = '25'; chunkLimit.value = '250';
-        chunkLimitValue.textContent = '250 words (~1.5 mins)';
+        chunkLimit.min = '300'; chunkLimit.max = '2000'; chunkLimit.step = '50'; chunkLimit.value = '1500';
+        chunkLimitValue.textContent = '1500 words (~10.0 mins)';
       } else if (mode === 'chars') {
         chunkLimit.min = '500'; chunkLimit.max = '3000'; chunkLimit.step = '100'; chunkLimit.value = '1200';
         chunkLimitValue.textContent = '1200 chars (~1.5 mins)';
@@ -279,6 +543,9 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
 
   // Load sample script
   btnSampleScript.addEventListener('click', () => {
+    state.uploadedScripts = [];
+    state.activeScriptId = null;
+    renderUploadedScriptsTray();
     scriptInput.value = SAMPLE_SCRIPT;
     updateInputStats();
     showToast('Loaded sample demo script!', 'info');
@@ -287,6 +554,9 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
   // Clear script
   btnClear.addEventListener('click', () => {
     scriptInput.value = '';
+    state.uploadedScripts = [];
+    state.activeScriptId = null;
+    renderUploadedScriptsTray();
     updateInputStats();
     state.chunks = [];
     workspacePanel.style.display = 'none';
@@ -302,6 +572,102 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
   if (btnDownloadAllAudio) btnDownloadAllAudio.addEventListener('click', handleDownloadAllAudio);
   btnExportJson.addEventListener('click', handleExportJson);
   btnStitchAudio.addEventListener('click', handleStitchAudio);
+
+  // New Feature Event Listeners
+  if (btnThemeToggle) btnThemeToggle.addEventListener('click', toggleTheme);
+  
+  if (btnPauseGeneration) {
+    btnPauseGeneration.addEventListener('click', () => {
+      state.generationPaused = !state.generationPaused;
+      if (state.generationPaused) {
+        btnPauseGeneration.classList.add('paused');
+        btnPauseGeneration.innerHTML = '<i class="fa-solid fa-play"></i> Resume';
+        showToast('Generation paused', 'info');
+      } else {
+        btnPauseGeneration.classList.remove('paused');
+        btnPauseGeneration.innerHTML = '<i class="fa-solid fa-pause"></i> Pause';
+        showToast('Generation resumed', 'info');
+      }
+    });
+  }
+
+  if (btnRetryFailed) {
+    btnRetryFailed.addEventListener('click', handleRetryFailedChunks);
+  }
+
+  if (workerCountSlider) {
+    workerCountSlider.addEventListener('input', (e) => {
+      if (workerCountValue) workerCountValue.textContent = e.target.value;
+      localStorage.setItem('sa_worker_count', e.target.value);
+    });
+    const savedWorkers = localStorage.getItem('sa_worker_count');
+    if (savedWorkers) {
+      workerCountSlider.value = savedWorkers;
+      if (workerCountValue) workerCountValue.textContent = savedWorkers;
+    }
+  }
+
+  if (importJsonInput) {
+    importJsonInput.addEventListener('change', handleImportJson);
+  }
+
+  if (btnResumeSession) {
+    btnResumeSession.addEventListener('click', applySessionResume);
+  }
+
+  if (btnDiscardSession) {
+    btnDiscardSession.addEventListener('click', discardSavedSession);
+  }
+
+  // Network Connectivity Monitoring for Graceful Interruption Recovery
+  window.addEventListener('offline', () => {
+    showToast('⚠️ Internet connection dropped! Pausing generation safely...', 'warning');
+    if (state.generationRunning && !state.generationPaused) {
+      state.generationPaused = true;
+      if (btnPauseGeneration) {
+        btnPauseGeneration.classList.add('paused');
+        btnPauseGeneration.innerHTML = '<i class="fa-solid fa-play"></i> Resume (Offline)';
+      }
+    }
+    triggerAutoSave();
+  });
+
+  window.addEventListener('online', () => {
+    showToast('📶 Internet connection restored! Ready to resume.', 'success');
+    if (state.generationRunning && state.generationPaused && btnPauseGeneration) {
+      btnPauseGeneration.innerHTML = '<i class="fa-solid fa-play"></i> Resume Generation';
+    }
+  });
+
+  // Global Keyboard Shortcuts
+  window.addEventListener('keydown', (e) => {
+    const isCtrlOrCmd = e.ctrlKey || e.metaKey;
+    if (!isCtrlOrCmd) return;
+
+    const key = e.key.toLowerCase();
+    if (key === 's') {
+      e.preventDefault();
+      handleSplitScript();
+    } else if (key === 'g') {
+      e.preventDefault();
+      if (btnGenerateAllApi && btnGenerateAllApi.style.display !== 'none' && !btnGenerateAllApi.disabled) {
+        handleGenerateAllApi();
+      }
+    } else if (key === 'd') {
+      e.preventDefault();
+      if (btnDownloadAllAudio && !btnDownloadAllAudio.disabled) {
+        handleDownloadAllAudio();
+      }
+    } else if (key === 'j') {
+      e.preventDefault();
+      if (btnStitchAudio && !btnStitchAudio.disabled) {
+        handleStitchAudio();
+      }
+    } else if (key === 't') {
+      e.preventDefault();
+      toggleTheme();
+    }
+  });
 
   // Search & Filter Pills
   chunkSearch.addEventListener('input', (e) => {
@@ -335,14 +701,7 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
   textareaWrapper.addEventListener('drop', (e) => {
     const files = e.dataTransfer.files;
     if (files.length > 0) {
-      const file = files[0];
-      const reader = new FileReader();
-      reader.onload = (res) => {
-        scriptInput.value = res.target.result;
-        updateInputStats();
-        showToast(`Imported file: ${file.name}`, 'success');
-      };
-      reader.readAsText(file);
+      handleImportScriptFiles(Array.from(files));
     }
   });
 
@@ -1296,27 +1655,93 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
     inputEstTime.textContent = stats.durationFormatted;
   }
 
-  function handleSplitScript() {
-    const text = scriptInput.value.trim();
-    if (!text) {
-      showToast('Please enter or paste a script first!', 'warning');
-      return;
+  function updateScriptFilterDropdown() {
+    if (!scriptFilterSelect) return;
+    const uniqueScripts = Array.from(new Set(state.chunks.map(c => c.scriptId).filter(Boolean)));
+    if (uniqueScripts.length > 1) {
+      scriptFilterSelect.style.display = 'inline-block';
+      scriptFilterSelect.innerHTML = '<option value="all">All Scripts (' + uniqueScripts.length + ')</option>';
+      uniqueScripts.forEach(sid => {
+        const opt = document.createElement('option');
+        opt.value = sid;
+        const count = state.chunks.filter(c => c.scriptId === sid).length;
+        opt.textContent = `${sid} (${count} Chunks)`;
+        scriptFilterSelect.appendChild(opt);
+      });
+      scriptFilterSelect.value = state.scriptFilter || 'all';
+    } else {
+      scriptFilterSelect.style.display = 'none';
+      state.scriptFilter = 'all';
     }
+  }
 
+  function handleSplitScript() {
     const mode = chunkMode.value;
     const limit = parseInt(chunkLimit.value, 10);
     const template = promptTemplate.value.trim();
 
-    state.chunks = Chunker.splitScript(text, mode, limit, template);
+    state.chunks = [];
+
+    // Case 1: Multiple or uploaded scripts
+    if (state.uploadedScripts.length > 0) {
+      let globalIndex = 1;
+      state.uploadedScripts.forEach(script => {
+        const text = script.text.trim();
+        if (!text) return;
+        const scriptChunks = Chunker.splitScript(text, mode, limit, template);
+        scriptChunks.forEach((sc, localIdx) => {
+          sc.index = globalIndex++;
+          sc.scriptId = script.id;
+          sc.scriptFilename = script.filename;
+          sc.chunkNumber = localIdx + 1;
+          sc.chunkName = `${script.id} Chunk ${localIdx + 1}`;
+          state.chunks.push(sc);
+        });
+      });
+    } else {
+      // Case 2: Direct script input in textarea without upload
+      const text = scriptInput.value.trim();
+      if (!text) {
+        showToast('Please enter, paste, or upload a script first!', 'warning');
+        return;
+      }
+      const rawChunks = Chunker.splitScript(text, mode, limit, template);
+      rawChunks.forEach((sc, idx) => {
+        sc.scriptId = 'V1';
+        sc.chunkNumber = idx + 1;
+        sc.chunkName = `Chunk #${idx + 1}`;
+        state.chunks.push(sc);
+      });
+    }
+
+    if (state.chunks.length === 0) {
+      showToast('No script text found to divide!', 'warning');
+      return;
+    }
+
     state.masterAudioBlob = null;
+    if (state.masterAudioUrl) URL.revokeObjectURL(state.masterAudioUrl);
+    state.masterAudioUrl = null;
     masterAudioCard.style.display = 'none';
+
+    updateScriptFilterDropdown();
 
     workspacePanel.style.display = 'block';
     workspacePanel.scrollIntoView({ behavior: 'smooth' });
 
     updateWorkspaceHeader();
     renderChunksList();
-    showToast(`Successfully split script into ${state.chunks.length} chunks!`, 'success');
+    triggerAutoSave();
+    showToast(`Successfully divided into ${state.chunks.length} chunks!`, 'success');
+
+    // Auto-generate if enabled
+    if (autoGenerateToggle && autoGenerateToggle.checked) {
+      if (AIStudio.hasValidKey()) {
+        setTimeout(() => handleGenerateAllApi(), 400);
+      } else {
+        showToast('Auto-generate skipped: Please add API key in Settings first!', 'warning');
+      }
+    }
   }
 
   function updateWorkspaceHeader() {
@@ -1345,7 +1770,7 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
     state.chunks.forEach((chunk) => {
       const seg = document.createElement('div');
       seg.className = `timeline-seg ${chunk.status}`;
-      seg.title = `Chunk ${chunk.index}: ${chunk.words} words (${chunk.status})`;
+      seg.title = `${chunk.chunkName || ('Chunk ' + chunk.index)}: ${chunk.words} words (${chunk.status})`;
       seg.addEventListener('click', () => {
         const cardElem = document.getElementById(`card_${chunk.id}`);
         if (cardElem) cardElem.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1361,10 +1786,17 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
     chunksContainer.innerHTML = '';
 
     const filtered = state.chunks.filter(chunk => {
-      const matchesSearch = !state.searchQuery || chunk.text.toLowerCase().includes(state.searchQuery);
-      if (state.filter === 'ready') return matchesSearch && chunk.status === 'ready';
-      if (state.filter === 'pending') return matchesSearch && chunk.status !== 'ready';
-      return matchesSearch;
+      const matchesSearch = !state.searchQuery || 
+        chunk.text.toLowerCase().includes(state.searchQuery) ||
+        (chunk.chunkName && chunk.chunkName.toLowerCase().includes(state.searchQuery));
+
+      const matchesScript = !state.scriptFilter || state.scriptFilter === 'all' || chunk.scriptId === state.scriptFilter;
+
+      let matchesStatus = true;
+      if (state.filter === 'ready') matchesStatus = chunk.status === 'ready';
+      if (state.filter === 'pending') matchesStatus = chunk.status !== 'ready';
+
+      return matchesSearch && matchesScript && matchesStatus;
     });
 
     if (filtered.length === 0) {
@@ -1384,27 +1816,36 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
 
       card.innerHTML = `
         <div class="chunk-card-header">
-          <span class="chunk-badge">
-            <i class="fa-solid fa-puzzle-piece"></i> Chunk #${chunk.index}
-          </span>
+          <div style="display:flex; align-items:center; gap:0.5rem;">
+            <button type="button" class="chunk-collapse-btn" data-chunk-id="${chunk.id}" title="Collapse or Expand chunk text">
+              <i class="fa-solid fa-chevron-${state.collapsedChunks.has(chunk.id) ? 'down' : 'up'}"></i>
+            </button>
+            <span class="chunk-badge">
+              <i class="fa-solid fa-puzzle-piece"></i> ${escapeHtml(chunk.chunkName || ('Chunk #' + chunk.index))}
+            </span>
+          </div>
           <div class="chunk-meta">
             <span><i class="fa-solid fa-font"></i> ${chunk.words} words</span>
             <span><i class="fa-solid fa-clock"></i> ~${chunk.estDurationFormatted}</span>
             <span class="status-tag ${chunk.status}">
               ${chunk.status === 'ready' ? '<i class="fa-solid fa-check" style="color:var(--success);"></i> Audio Ready' : 
-                (chunk.status === 'generating' ? '<i class="fa-solid fa-circle-notch spin-slow" style="color:var(--warning);"></i> Generating...' : '<i class="fa-solid fa-hourglass-start"></i> Pending Audio')}
+                (chunk.status === 'generating' ? '<i class="fa-solid fa-circle-notch spin-slow" style="color:var(--warning);"></i> Generating...' : 
+                (chunk.status === 'failed' ? '<i class="fa-solid fa-triangle-exclamation" style="color:var(--danger);"></i> Failed' : '<i class="fa-solid fa-hourglass-start"></i> Pending Audio'))}
             </span>
           </div>
         </div>
 
-        <div class="chunk-text-box" contenteditable="true" data-chunk-id="${chunk.id}">
+        <div class="chunk-text-box ${state.collapsedChunks.has(chunk.id) ? 'collapsed' : ''}" contenteditable="true" data-chunk-id="${chunk.id}">
           ${escapeHtml(chunk.text)}
         </div>
 
         <div class="chunk-actions">
           <div class="action-group">
-            <button class="btn btn-secondary btn-sm btn-copy-chunk" data-chunk-id="${chunk.id}">
-              <i class="fa-solid fa-copy"></i> Copy for AI Studio
+            <button class="btn btn-secondary btn-sm btn-copy-chunk" data-chunk-id="${chunk.id}" title="Copy formatted prompt for Google AI Studio">
+              <i class="fa-solid fa-copy"></i> Copy Prompt
+            </button>
+            <button class="btn btn-ghost btn-sm btn-copy-raw" data-chunk-id="${chunk.id}" title="Copy clean script text only">
+              <i class="fa-regular fa-clipboard"></i> Copy Text
             </button>
             ${AIStudio.hasValidKey() ? `
               <button class="btn btn-accent btn-sm btn-gen-api" data-chunk-id="${chunk.id}" ${chunk.status === 'generating' ? 'disabled' : ''}>
@@ -1445,7 +1886,31 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
         updateWorkspaceHeader();
       });
 
-      // Copy Chunk Button
+      // Collapse / Expand toggle
+      const btnCollapse = card.querySelector('.chunk-collapse-btn');
+      if (btnCollapse) {
+        btnCollapse.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (state.collapsedChunks.has(chunk.id)) {
+            state.collapsedChunks.delete(chunk.id);
+          } else {
+            state.collapsedChunks.add(chunk.id);
+          }
+          renderChunksList();
+        });
+      }
+
+      // Copy Clean Script Text
+      const btnCopyRaw = card.querySelector('.btn-copy-raw');
+      if (btnCopyRaw) {
+        btnCopyRaw.addEventListener('click', () => {
+          navigator.clipboard.writeText(chunk.text).then(() => {
+            showToast(`Chunk #${chunk.index} clean text copied!`, 'success');
+          });
+        });
+      }
+
+      // Copy Chunk Prompt Button
       const btnCopy = card.querySelector('.btn-copy-chunk');
       btnCopy.addEventListener('click', () => {
         const formattedText = AIStudio.formatClipboardPrompt(chunk.text, promptTemplate.value);
@@ -1543,15 +2008,172 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
       return;
     }
 
-    showToast(`Starting generation for ${pendingChunks.length} chunks...`, 'info');
+    if (!AIStudio.hasValidKey()) {
+      showToast('Please add at least one valid Google AI Studio API key in Settings first!', 'warning');
+      settingsModal.style.display = 'flex';
+      return;
+    }
 
-    for (let i = 0; i < pendingChunks.length; i++) {
-      const chunk = pendingChunks[i];
-      await handleGenerateSingleApi(chunk);
-      if (i < pendingChunks.length - 1) {
-        await new Promise(r => setTimeout(r, 1200));
+    state.generationRunning = true;
+    state.generationPaused = false;
+    state.generationAborted = false;
+    state.genStats = { active: 0, done: 0, failed: 0, startTime: Date.now() };
+
+    btnGenerateAllApi.disabled = true;
+    const origBtnHtml = btnGenerateAllApi.innerHTML;
+    btnGenerateAllApi.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Generating in Parallel...';
+
+    if (btnPauseGeneration) {
+      btnPauseGeneration.style.display = 'inline-flex';
+      btnPauseGeneration.classList.remove('paused');
+      btnPauseGeneration.innerHTML = '<i class="fa-solid fa-pause"></i> Pause';
+    }
+    if (btnRetryFailed) btnRetryFailed.style.display = 'none';
+    updateLiveGenStats();
+
+    showToast(`Starting parallel generation for ${pendingChunks.length} chunks...`, 'info');
+
+    const keys = AIStudio.getKeys();
+    const activeVoice = AIStudio.getVoice();
+    const activeModel = AIStudio.getModel();
+
+    const maxConcurrency = Math.min(10, Math.max(1, parseInt(workerCountSlider?.value || 4, 10)));
+    let nextChunkIdx = 0;
+    let completedCount = 0;
+    const totalPending = pendingChunks.length;
+
+    const keyCooldowns = {};
+    keys.forEach(k => { keyCooldowns[k] = 0; });
+
+    function getAvailableKey() {
+      const now = Date.now();
+      const valid = keys.filter(k => (keyCooldowns[k] || 0) <= now);
+      if (valid.length > 0) {
+        return valid[Math.floor(Math.random() * valid.length)];
+      }
+      return keys[0];
+    }
+
+    async function processWorker() {
+      while (nextChunkIdx < pendingChunks.length) {
+        if (state.generationAborted) break;
+
+        // Check and handle paused state
+        while (state.generationPaused && !state.generationAborted) {
+          await new Promise(r => setTimeout(r, 400));
+        }
+        if (state.generationAborted) break;
+
+        const chunk = pendingChunks[nextChunkIdx++];
+        if (!chunk || chunk.status === 'ready') continue;
+
+        state.genStats.active++;
+        chunk.status = 'generating';
+        updateWorkspaceHeader();
+        renderChunksList();
+        updateLiveGenStats();
+
+        let success = false;
+        let attempts = 0;
+        const maxAttempts = 3;
+
+        while (!success && attempts < maxAttempts) {
+          if (state.generationAborted) break;
+          while (state.generationPaused && !state.generationAborted) {
+            await new Promise(r => setTimeout(r, 400));
+          }
+          if (state.generationAborted) break;
+
+          attempts++;
+          const keyToUse = getAvailableKey();
+          try {
+            const audioBlob = await AIStudio.generateAudioWithSpecificKey(
+              chunk.text,
+              activeVoice,
+              activeModel,
+              keyToUse,
+              promptTemplate.value.trim()
+            );
+
+            chunk.audioBlob = audioBlob;
+            chunk.audioUrl = URL.createObjectURL(audioBlob);
+            chunk.status = 'ready';
+            chunk.voice = activeVoice;
+            delete chunk.error;
+            success = true;
+            completedCount++;
+            state.genStats.active = Math.max(0, state.genStats.active - 1);
+            state.genStats.done++;
+            triggerAutoSave();
+            btnGenerateAllApi.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Generating (${completedCount}/${totalPending})...`;
+          } catch (err) {
+            console.warn(`Chunk ${chunk.chunkName || chunk.index} attempt ${attempts} error:`, err.message);
+            if (err.message && (err.message.includes('429') || err.message.includes('quota') || err.message.includes('RESOURCE_EXHAUSTED'))) {
+              keyCooldowns[keyToUse] = Date.now() + 25000;
+            }
+            if (attempts < maxAttempts) {
+              await new Promise(r => setTimeout(r, 1500 * attempts));
+            } else {
+              chunk.status = 'failed';
+              chunk.error = err.message;
+              state.genStats.active = Math.max(0, state.genStats.active - 1);
+              state.genStats.failed++;
+            }
+          }
+          updateLiveGenStats();
+        }
+
+        updateWorkspaceHeader();
+        renderChunksList();
       }
     }
+
+    const workerPromises = [];
+    const activeWorkers = Math.min(maxConcurrency, pendingChunks.length);
+    for (let w = 0; w < activeWorkers; w++) {
+      workerPromises.push(processWorker());
+    }
+
+    await Promise.all(workerPromises);
+
+    state.generationRunning = false;
+    state.generationPaused = false;
+    btnGenerateAllApi.disabled = false;
+    btnGenerateAllApi.innerHTML = origBtnHtml;
+    if (btnPauseGeneration) btnPauseGeneration.style.display = 'none';
+    updateLiveGenStats();
+    updateWorkspaceHeader();
+    renderChunksList();
+    triggerAutoSave();
+
+    const failedCount = state.chunks.filter(c => c.status === 'failed').length;
+    if (btnRetryFailed) {
+      btnRetryFailed.style.display = failedCount > 0 ? 'inline-flex' : 'none';
+    }
+
+    const finalReady = state.chunks.filter(c => c.status === 'ready').length;
+    if (finalReady === state.chunks.length) {
+      playSuccessChime();
+      showToast(`🎉 All ${state.chunks.length} chunks successfully generated!`, 'success');
+    } else {
+      showToast(`Generation completed: ${finalReady} ready, ${failedCount} failed.`, failedCount > 0 ? 'warning' : 'success');
+    }
+  }
+
+  function handleRetryFailedChunks() {
+    const failedChunks = state.chunks.filter(c => c.status === 'failed' || (c.status === 'pending' && c.error));
+    if (failedChunks.length === 0) {
+      showToast('No failed chunks found to retry!', 'info');
+      return;
+    }
+    failedChunks.forEach(c => {
+      c.status = 'pending';
+      delete c.error;
+    });
+    updateWorkspaceHeader();
+    renderChunksList();
+    showToast(`Retrying ${failedChunks.length} failed chunk(s)...`, 'info');
+    handleGenerateAllApi();
   }
 
   function handleCopyAllChunks() {
@@ -1567,7 +2189,7 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
   }
 
   async function handleDownloadAllAudio() {
-    const readyChunks = state.chunks.filter(c => c.status === 'ready' && c.audioUrl);
+    const readyChunks = state.chunks.filter(c => c.status === 'ready' && (c.audioBlob || c.audioUrl));
     if (readyChunks.length === 0) {
       showToast('No audio clips ready to download yet. Generate audio first!', 'warning');
       return;
@@ -1576,39 +2198,118 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
     const originalHtml = btnDownloadAllAudio ? btnDownloadAllAudio.innerHTML : '';
     if (btnDownloadAllAudio) {
       btnDownloadAllAudio.disabled = true;
+      btnDownloadAllAudio.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Building ZIP...';
     }
 
-    showToast(`Downloading ${readyChunks.length} voiceover clip(s)...`, 'info');
+    showToast(`Packaging ${readyChunks.length} audio clip(s) into ZIP...`, 'info');
 
     try {
-      for (let i = 0; i < readyChunks.length; i++) {
-        const chunk = readyChunks[i];
-        if (btnDownloadAllAudio) {
-          btnDownloadAllAudio.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Downloading (${i + 1}/${readyChunks.length})...`;
+      if (typeof JSZip === 'undefined') {
+        throw new Error('JSZip library is missing');
+      }
+
+      const zip = new JSZip();
+      const chunksFolder = zip.folder("individual_chunks");
+
+      const scriptsMap = {};
+      readyChunks.forEach(c => {
+        const sid = c.scriptId || 'V1';
+        if (!scriptsMap[sid]) scriptsMap[sid] = [];
+        scriptsMap[sid].push(c);
+      });
+
+      const isMp3 = downloadFormatSelect && downloadFormatSelect.value === 'mp3';
+      const audioExt = isMp3 ? 'mp3' : 'wav';
+      const audioCtx = isMp3 ? new (window.AudioContext || window.webkitAudioContext)() : null;
+
+      for (const chunk of readyChunks) {
+        const sid = chunk.scriptId || 'V1';
+        const cNum = String(chunk.chunkNumber || chunk.index).padStart(3, '0');
+        const filename = `${sid}_Chunk_${cNum}.${audioExt}`;
+        let blob = chunk.audioBlob;
+        if (!blob && chunk.audioUrl) {
+          const resp = await fetch(chunk.audioUrl);
+          blob = await resp.blob();
         }
-
-        const voiceClean = (chunk.voice || 'voiceover').toLowerCase().replace(/[^a-z0-9]/g, '_');
-        const filename = `chunk_${String(chunk.index).padStart(2, '0')}_${voiceClean}.wav`;
-
-        const link = document.createElement('a');
-        link.href = chunk.audioUrl;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-
-        if (i < readyChunks.length - 1) {
-          await new Promise(r => setTimeout(r, 400));
+        if (blob) {
+          let chunkOutBlob = blob;
+          if (isMp3 && typeof BulkStitcher !== 'undefined' && typeof lamejs !== 'undefined') {
+            try {
+              const abuf = await BulkStitcher.decodeBlobToAudioBuffer(blob, audioCtx);
+              chunkOutBlob = BulkStitcher.encodeMp3Blob(abuf, 192);
+            } catch (e) {
+              console.warn('Chunk MP3 convert fallback to WAV:', e);
+              chunkOutBlob = blob;
+            }
+          }
+          chunksFolder.file(filename, chunkOutBlob);
         }
       }
-      showToast(`Successfully downloaded all ${readyChunks.length} voiceover clips!`, 'success');
+
+      let manifestLines = [
+        '=======================================================',
+        'ScriptAudio Studio - Master Audio Generation Manifest',
+        'Generated at: ' + new Date().toISOString(),
+        'Audio Format: ' + audioExt.toUpperCase(),
+        'Total Ready Clips: ' + readyChunks.length,
+        '=======================================================\n'
+      ];
+
+      for (const [sid, scriptChunks] of Object.entries(scriptsMap)) {
+        scriptChunks.sort((a, b) => (a.chunkNumber || a.index) - (b.chunkNumber || b.index));
+        
+        manifestLines.push(`[Script ${sid}] - ${scriptChunks.length} Chunks`);
+        scriptChunks.forEach(sc => {
+          manifestLines.push(`  - ${sc.chunkName || ('Chunk ' + sc.index)} (${sc.words} words)`);
+        });
+
+        try {
+          const blobs = scriptChunks.map(c => c.audioBlob).filter(Boolean);
+          if (blobs.length > 0) {
+            const masterWavBlob = await AudioStitcher.stitchAudioBlobs(blobs, 0.35);
+            let finalMasterBlob = masterWavBlob;
+            if (isMp3 && typeof BulkStitcher !== 'undefined' && typeof lamejs !== 'undefined') {
+              try {
+                const abuf = await BulkStitcher.decodeBlobToAudioBuffer(masterWavBlob, audioCtx);
+                finalMasterBlob = BulkStitcher.encodeMp3Blob(abuf, 192);
+              } catch (e) {
+                console.warn('Master MP3 convert fallback:', e);
+                finalMasterBlob = masterWavBlob;
+              }
+            }
+            zip.file(`${sid}.${audioExt}`, finalMasterBlob);
+            manifestLines.push(`  -> Assembled Master Track: ${sid}.${audioExt}\n`);
+          }
+        } catch (stitchErr) {
+          console.warn(`Could not stitch master audio for ${sid}:`, stitchErr);
+        }
+      }
+
+      zip.file('README_MANIFEST.txt', manifestLines.join('\n'));
+
+      const zipBlob = await zip.generateAsync({ type: 'blob' }, (metadata) => {
+        if (btnDownloadAllAudio) {
+          btnDownloadAllAudio.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Zipping ${metadata.percent.toFixed(0)}%...`;
+        }
+      });
+
+      const downloadUrl = URL.createObjectURL(zipBlob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `Voiceovers_${Date.now()}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(downloadUrl), 5000);
+
+      showToast(`ZIP package downloaded successfully! (${(zipBlob.size / 1024 / 1024).toFixed(1)} MB)`, 'success');
     } catch (err) {
-      console.error('Download all error:', err);
-      showToast('Error downloading some audio clips: ' + err.message, 'warning');
+      console.error('Download ZIP error:', err);
+      showToast('Error packaging ZIP: ' + err.message, 'warning');
     } finally {
       if (btnDownloadAllAudio) {
         btnDownloadAllAudio.disabled = false;
-        btnDownloadAllAudio.innerHTML = originalHtml || '<i class="fa-solid fa-cloud-arrow-down"></i> Download All Audio';
+        btnDownloadAllAudio.innerHTML = originalHtml || '<i class="fa-solid fa-file-zipper"></i> Download All (ZIP)';
       }
     }
   }
@@ -1625,18 +2326,25 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
   }
 
   async function handleStitchAudio() {
-    const readyChunks = state.chunks.filter(c => c.status === 'ready' && c.audioBlob);
-    if (readyChunks.length === 0) {
-      showToast('No audio clips available to stitch!', 'warning');
+    let targetChunks = state.chunks.filter(c => c.status === 'ready' && c.audioBlob);
+    
+    if (state.scriptFilter && state.scriptFilter !== 'all') {
+      targetChunks = targetChunks.filter(c => c.scriptId === state.scriptFilter);
+    }
+
+    if (targetChunks.length === 0) {
+      showToast('No audio clips available to stitch for current selection!', 'warning');
       return;
     }
+
+    targetChunks.sort((a, b) => (a.chunkNumber || a.index) - (b.chunkNumber || b.index));
 
     btnStitchAudio.disabled = true;
     btnStitchAudio.innerHTML = '<i class="fa-solid fa-circle-notch spin-slow"></i> Stitching Audio Clips...';
 
     try {
-      const audioBlobs = state.chunks.map(c => c.audioBlob).filter(Boolean);
-      const masterBlob = await AudioStitcher.stitchAudioBlobs(audioBlobs, 0.4);
+      const audioBlobs = targetChunks.map(c => c.audioBlob).filter(Boolean);
+      const masterBlob = await AudioStitcher.stitchAudioBlobs(audioBlobs, 0.35);
 
       if (state.masterAudioUrl) URL.revokeObjectURL(state.masterAudioUrl);
 
@@ -1644,9 +2352,10 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
       state.masterAudioUrl = URL.createObjectURL(masterBlob);
 
       masterAudioPlayer.src = state.masterAudioUrl;
+      const scriptLabel = (state.scriptFilter && state.scriptFilter !== 'all') ? state.scriptFilter : 'master_voiceover';
       btnDownloadMaster.href = state.masterAudioUrl;
+      btnDownloadMaster.download = `${scriptLabel}.wav`;
 
-      // Get audio duration
       const tempAudio = new Audio(state.masterAudioUrl);
       tempAudio.onloadedmetadata = () => {
         const mins = Math.floor(tempAudio.duration / 60);
@@ -1657,7 +2366,7 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
       masterAudioCard.style.display = 'flex';
       masterAudioCard.scrollIntoView({ behavior: 'smooth' });
 
-      showToast('Master Voiceover Track successfully stitched!', 'success');
+      showToast(`Master Voiceover Track (${scriptLabel}) successfully stitched!`, 'success');
     } catch (err) {
       showToast(`Stitching Error: ${err.message}`, 'warning');
     }
@@ -1694,6 +2403,243 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
+  }
+
+  // --- Live Generation Stats UI Updater ---
+  function updateLiveGenStats() {
+    if (!liveGenStats) return;
+    if (!state.generationRunning) {
+      liveGenStats.style.display = 'none';
+      return;
+    }
+    liveGenStats.style.display = 'flex';
+    if (genStatActive) genStatActive.textContent = state.genStats.active;
+    if (genStatDone) genStatDone.textContent = state.genStats.done;
+    if (genStatFailed) genStatFailed.textContent = state.genStats.failed;
+
+    // Calculate dynamic ETA
+    const pending = state.chunks.filter(c => c.status !== 'ready').length;
+    if (state.genStats.done > 0 && state.genStats.startTime > 0) {
+      const elapsedSecs = (Date.now() - state.genStats.startTime) / 1000;
+      const avgSecPerChunk = elapsedSecs / state.genStats.done;
+      const workers = Math.max(1, parseInt(workerCountSlider?.value || 4, 10));
+      const remainingSecs = Math.round((pending * avgSecPerChunk) / workers);
+      const mins = Math.floor(remainingSecs / 60);
+      const secs = remainingSecs % 60;
+      if (genStatEta) genStatEta.textContent = `${mins}m ${secs < 10 ? '0' : ''}${secs}s`;
+    } else {
+      if (genStatEta) genStatEta.textContent = 'Calculating...';
+    }
+  }
+
+  // --- Project JSON Import ---
+  function handleImportJson(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        if (!Array.isArray(data) || data.length === 0) {
+          showToast('Invalid project JSON: Expected an array of chunks', 'warning');
+          return;
+        }
+        state.chunks = data;
+        state.chunks.forEach(c => {
+          c.audioBlob = null;
+          c.audioUrl = null;
+          if (c.status === 'ready') c.status = 'pending';
+        });
+        updateScriptFilterDropdown();
+        workspacePanel.style.display = 'block';
+        updateWorkspaceHeader();
+        renderChunksList();
+        triggerAutoSave();
+        showToast(`Imported project with ${state.chunks.length} chunks!`, 'success');
+      } catch (err) {
+        showToast('Error reading project JSON: ' + err.message, 'warning');
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+  }
+
+  // --- Synthesis Audio Chime for Completion ---
+  function playSuccessChime() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(659.25, now); // E5
+      gain1.gain.setValueAtTime(0.12, now);
+      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.35);
+
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(987.77, now + 0.12); // B5
+      gain2.gain.setValueAtTime(0.18, now + 0.12);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now + 0.12);
+      osc2.stop(now + 0.55);
+    } catch (_) {}
+  }
+
+  // --- Theme Switching ---
+  function applyTheme(theme) {
+    state.theme = theme;
+    if (theme === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+      if (themeIcon) themeIcon.className = 'fa-solid fa-sun';
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+      if (themeIcon) themeIcon.className = 'fa-solid fa-moon';
+    }
+    localStorage.setItem('sa_theme', theme);
+  }
+
+  function toggleTheme() {
+    const newTheme = state.theme === 'light' ? 'dark' : 'light';
+    applyTheme(newTheme);
+    showToast(`Switched to ${newTheme} theme`, 'info');
+  }
+
+  // --- Persistent Autosave & Interruption Resume Engine ---
+  const AUTOSAVE_KEY = 'scriptaudio_autosave_state';
+
+  function triggerAutoSave() {
+    try {
+      if (!state.chunks || state.chunks.length === 0) return;
+      
+      const serializableChunks = state.chunks.map(c => ({
+        id: c.id,
+        index: c.index,
+        scriptId: c.scriptId,
+        scriptFilename: c.scriptFilename,
+        chunkNumber: c.chunkNumber,
+        chunkName: c.chunkName,
+        text: c.text,
+        words: c.words,
+        estDurationSeconds: c.estDurationSeconds,
+        estDurationFormatted: c.estDurationFormatted,
+        status: c.status,
+        voice: c.voice,
+        hasAudio: c.status === 'ready' && !!(c.audioBlob || c.audioUrl)
+      }));
+
+      const sessionData = {
+        timestamp: Date.now(),
+        scriptInputValue: scriptInput ? scriptInput.value : '',
+        activeScriptId: state.activeScriptId,
+        uploadedScripts: state.uploadedScripts,
+        chunks: serializableChunks
+      };
+
+      localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(sessionData));
+
+      if (typeof BulkStorage !== 'undefined') {
+        state.chunks.forEach(c => {
+          if (c.status === 'ready' && c.audioBlob) {
+            BulkStorage.saveAudioBlob(c.id, c.audioBlob).catch(() => {});
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('Autosave warning:', e);
+    }
+  }
+
+  function startAutoSaveInterval() {
+    setInterval(() => {
+      if (state.chunks && state.chunks.length > 0) {
+        triggerAutoSave();
+      }
+    }, 10000);
+  }
+
+  async function restoreAutoSave() {
+    try {
+      const raw = localStorage.getItem(AUTOSAVE_KEY);
+      if (!raw) return;
+      const session = JSON.parse(raw);
+      if (!session || !session.chunks || session.chunks.length === 0) return;
+
+      const total = session.chunks.length;
+      const ready = session.chunks.filter(c => c.hasAudio || c.status === 'ready').length;
+
+      if (resumeBanner && resumeTotalCount && resumeReadyCount) {
+        resumeTotalCount.textContent = total;
+        resumeReadyCount.textContent = ready;
+        resumeBanner.style.display = 'flex';
+      }
+    } catch (e) {
+      console.warn('Autosave restore check failed:', e);
+    }
+  }
+
+  async function applySessionResume() {
+    try {
+      const raw = localStorage.getItem(AUTOSAVE_KEY);
+      if (!raw) return;
+      const session = JSON.parse(raw);
+      if (!session || !session.chunks) return;
+
+      if (session.scriptInputValue && !scriptInput.value) {
+        scriptInput.value = session.scriptInputValue;
+      }
+      if (session.uploadedScripts && session.uploadedScripts.length > 0) {
+        state.uploadedScripts = session.uploadedScripts;
+        state.activeScriptId = session.activeScriptId;
+        renderUploadedScriptsTray();
+      }
+
+      state.chunks = session.chunks;
+      
+      if (typeof BulkStorage !== 'undefined') {
+        for (const chunk of state.chunks) {
+          if (chunk.hasAudio || chunk.status === 'ready') {
+            try {
+              const blob = await BulkStorage.getAudioBlob(chunk.id);
+              if (blob) {
+                chunk.audioBlob = blob;
+                chunk.audioUrl = URL.createObjectURL(blob);
+                chunk.status = 'ready';
+              }
+            } catch (_) {}
+          }
+        }
+      }
+
+      updateInputStats();
+      updateScriptFilterDropdown();
+      workspacePanel.style.display = 'block';
+      updateWorkspaceHeader();
+      renderChunksList();
+
+      if (resumeBanner) resumeBanner.style.display = 'none';
+      showToast(`Session successfully restored! (${state.chunks.length} chunks)`, 'success');
+    } catch (err) {
+      console.error('Session resume error:', err);
+      showToast('Failed to resume session: ' + err.message, 'warning');
+    }
+  }
+
+  function discardSavedSession() {
+    localStorage.removeItem(AUTOSAVE_KEY);
+    if (resumeBanner) resumeBanner.style.display = 'none';
+    showToast('Previous session cleared', 'info');
   }
 
 });

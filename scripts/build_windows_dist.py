@@ -19,13 +19,29 @@ BUILD_DIR = os.path.join(DIST_DIR, "build_win")
 ASSETS_DIR = os.path.join(PROJECT_ROOT, "assets")
 SFX_BIN = os.path.join(ASSETS_DIR, "7zS.sfx")
 VERSION = "2.1.0"
-DESKTOP_DIR = "/Users/shaddo/Desktop"
+DESKTOP_DIR = os.path.expanduser("~/Desktop")
 
-SEVEN_ZIP = shutil.which("7zz") or shutil.which("7z") or "/opt/homebrew/bin/7zz"
+def find_seven_zip():
+    candidates = [
+        shutil.which("7z"),
+        shutil.which("7zz"),
+        shutil.which("7z.exe"),
+        r"C:\Program Files\7-Zip\7z.exe",
+        r"C:\Program Files (x86)\7-Zip\7z.exe",
+        "/opt/homebrew/bin/7zz",
+        "/usr/local/bin/7zz",
+        "/usr/bin/7z"
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return "7z"
+
+SEVEN_ZIP = find_seven_zip()
 
 def check_prerequisites():
-    if not os.path.exists(SEVEN_ZIP):
-        raise FileNotFoundError(f"7-Zip binary (7zz) not found at {SEVEN_ZIP}")
+    if not (os.path.exists(SEVEN_ZIP) or shutil.which(SEVEN_ZIP)):
+        raise FileNotFoundError(f"7-Zip binary not found on this system. Please install 7-Zip.")
     if not os.path.exists(SFX_BIN):
         raise FileNotFoundError(f"Windows SFX module not found at {SFX_BIN}")
     print(f"✓ Found 7-Zip: {SEVEN_ZIP}")
@@ -245,8 +261,12 @@ Enjoy studio-quality Google AI voiceover production!
 
     # 6. Verify PE Executable Header with file command & 7z integrity check
     print("🔍 Running executable verification checks...")
-    file_info = subprocess.check_output(["file", out_exe]).decode().strip()
-    print(f"  • Binary info: {file_info}")
+    if shutil.which("file"):
+        try:
+            file_info = subprocess.check_output(["file", out_exe]).decode().strip()
+            print(f"  • Binary info: {file_info}")
+        except Exception:
+            pass
     
     test_res = subprocess.check_output([SEVEN_ZIP, "t", out_exe]).decode()
     if "Everything is Ok" in test_res:
@@ -254,14 +274,18 @@ Enjoy studio-quality Google AI voiceover production!
     else:
         print(f"  • Warning on archive test: {test_res}")
 
-    # 7. Copy to Desktop for immediate user access
-    desktop_exe = os.path.join(DESKTOP_DIR, exe_name)
-    desktop_zip = os.path.join(DESKTOP_DIR, zip_name)
-    shutil.copy2(out_exe, desktop_exe)
-    shutil.copy2(out_zip, desktop_zip)
-    print(f"📂 Copied to Desktop:")
-    print(f"  • {desktop_exe}")
-    print(f"  • {desktop_zip}")
+    # 7. Copy to Desktop if available
+    if os.path.exists(DESKTOP_DIR):
+        try:
+            desktop_exe = os.path.join(DESKTOP_DIR, exe_name)
+            desktop_zip = os.path.join(DESKTOP_DIR, zip_name)
+            shutil.copy2(out_exe, desktop_exe)
+            shutil.copy2(out_zip, desktop_zip)
+            print(f"📂 Copied to Desktop:")
+            print(f"  • {desktop_exe}")
+            print(f"  • {desktop_zip}")
+        except Exception as e:
+            print(f"  • Skipped desktop copy: {e}")
 
     # Cleanup staging directory
     shutil.rmtree(BUILD_DIR)

@@ -1,0 +1,83 @@
+name: Build Error-Free Windows Executable
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build Standalone Windows Executable
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate JavaScript Syntax
+        shell: bash
+        run: |
+          node -c js/*.js
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verify 7-Zip on Windows Runner
+        shell: pwsh
+        run: |
+          Get-Command 7z
+          7z --help | Select-Object -First 3
+
+      - name: Build Windows Standalone Executable & Portable Release
+        shell: pwsh
+        run: |
+          python scripts/build_windows_dist.py
+
+      - name: Verify Executable Archive Integrity
+        shell: pwsh
+        run: |
+          $exePath = "dist/ScriptAudio Studio.exe"
+          if (-not (Test-Path $exePath)) {
+            Write-Error "Executable not generated: $exePath"
+            exit 1
+          }
+          $item = Get-Item $exePath
+          Write-Host "Generated Executable Size: $([math]::Round($item.Length / 1MB, 2)) MB"
+          
+          # Test archive inside SFX
+          7z t "$exePath"
+          Write-Host "Executable archive verification: PASSED"
+
+      - name: Upload Windows Standalone .exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScriptAudio-Studio-Windows-Executable
+          path: dist/ScriptAudio Studio.exe
+          if-no-files-found: error
+
+      - name: Upload Windows Portable .zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScriptAudio-Studio-Windows-Portable
+          path: dist/*.zip
+          if-no-files-found: error
+
+      - name: Create GitHub Release (on Tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/ScriptAudio Studio.exe
+            dist/*.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
