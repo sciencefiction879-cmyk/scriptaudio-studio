@@ -1,0 +1,11 @@
+# System
+.DS_Store
+Thumbs.db
+*.tmp
+
+# Unrelated project folders
+StockVideoMaker/
+ShieldVPN/
+
+# Temporary build staging
+dist/build_win/

@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ScriptAudio Studio - Script Chunker & Google AI Studio Voiceover Assistant</title>
+  <meta name="description" content="Intelligently split long scripts into optimal sections for Google AI Studio audio generation, manage audio clips, and stitch master voiceovers seamlessly.">
+  
+  <!-- Google Fonts & Font Awesome Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    
+    <!-- Top Navigation Header -->
+    <header class="app-header">
+      <div class="header-brand">
+        <div class="logo-icon">
+          <i class="fa-solid fa-microphone-lines"></i>
+        </div>
+        <div class="brand-text">
+          <h1>ScriptAudio <span class="badge">STUDIO</span></h1>
+          <p>Google AI Studio Script Chunker & Master Audio Weaver</p>
+        </div>
+      </div>
+      
+      <div class="header-actions">
+        <button id="btnVoiceGallery" class="btn btn-secondary">
+          <i class="fa-solid fa-headset"></i>
+          <span>Voice Artists (30)</span>
+        </button>
+        <button id="btnSettings" class="btn btn-secondary">
+          <i class="fa-solid fa-key"></i>
+          <span id="headerKeysLabel">API Keys (0)</span>
+          <span id="apiStatusBadge" class="status-indicator disconnected"></span>
+        </button>
+        <button id="btnSampleScript" class="btn btn-ghost">
+          <i class="fa-solid fa-lightbulb"></i> Load Sample Script
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="app-main">
+      
+      <!-- Script Input & Splitter Controls Panel -->
+      <section class="panel input-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <i class="fa-solid fa-file-lines"></i>
+            <h2>1. Import & Configure Script</h2>
+          </div>
+          <div class="script-header-right">
+            <button id="btnPasteScriptHeader" class="btn btn-primary btn-sm" type="button" title="Paste script from clipboard">
+              <i class="fa-solid fa-paste"></i> Paste Script
+            </button>
+            <div class="script-meta-badges">
+              <span class="meta-badge"><i class="fa-solid fa-font"></i> Words: <strong id="inputWordCount">0</strong></span>
+              <span class="meta-badge"><i class="fa-solid fa-clock"></i> Est. Voiceover: <strong id="inputEstTime">0m 0s</strong></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-body">
+          <!-- AI Studio Vocal Tags & Quick Action Bar -->
+          <div class="script-toolbar">
+            <div class="toolbar-left">
+              <button id="btnPasteClipboard" class="btn btn-secondary btn-sm" type="button" title="Paste text from clipboard directly into script">
+                <i class="fa-solid fa-clipboard"></i> Paste from Clipboard
+              </button>
+            </div>
+            <div class="toolbar-right">
+              <span class="vocal-tags-label"><i class="fa-solid fa-wand-magic-sparkles"></i> AI Studio Vocal Tags:</span>
+              <div class="vocal-tags-group">
+                <button type="button" class="btn-tag" data-tag="<laugh>" title="Insert laughter or chuckle">😄 &lt;laugh&gt;</button>
+                <button type="button" class="btn-tag" data-tag="<sigh>" title="Insert emotional or relieved sigh">😮‍💨 &lt;sigh&gt;</button>
+                <button type="button" class="btn-tag" data-tag="<breath>" title="Insert audible realistic breath">💨 &lt;breath&gt;</button>
+                <button type="button" class="btn-tag" data-tag="<short pause>" title="Insert brief dramatic silence">⏸️ &lt;short pause&gt;</button>
+                <button type="button" class="btn-tag" data-tag="<whisper>" data-close="</whisper>" title="Wrap text in whisper">🤫 &lt;whisper&gt;</button>
+                <button type="button" class="btn-tag" data-tag="<gasp>" title="Insert gasp or shock">😲 &lt;gasp&gt;</button>
+                <button type="button" class="btn-tag" data-tag="<emphasis>" data-close="</emphasis>" title="Emphasize key words">💡 &lt;emphasis&gt;</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="textarea-wrapper">
+            <textarea id="scriptInput" placeholder="Paste your full script here (e.g. YouTube video script, podcast narrative, audiobook chapter, or dialogue)..."></textarea>
+            <div class="drag-drop-overlay" id="dragOverlay">
+              <i class="fa-solid fa-file-arrow-up"></i>
+              <p>Drop your script file (.txt, .md, .json) here</p>
+            </div>
+          </div>
+
+          <!-- 2. Voiceover Artists Selection (Directly under Script Box) -->
+          <!-- 2. Voiceover Artists Selection (Compact & User-Friendly directly under Script Box) -->
+          <div class="voice-gallery-container main-voice-section">
+            <!-- Sleek Active Voice Summary Bar (Always Visible, Minimal Space) -->
+            <div class="active-voice-summary-bar">
+              <div class="active-voice-left">
+                <div class="active-voice-avatar">
+                  <i class="fa-solid fa-headset"></i>
+                </div>
+                <div class="active-voice-details">
+                  <div class="active-voice-title-line">
+                    <span class="active-voice-title-label">Voiceover Artist:</span>
+                    <strong class="active-voice-title-name" id="activeVoiceDisplayName">Kore</strong>
+                    <span class="badge-mini featured" id="activeVoiceFeaturedBadge"><i class="fa-solid fa-star"></i> Featured</span>
+                    <span class="badge-mini gender female" id="activeVoiceGenderBadge"><i class="fa-solid fa-venus"></i> Female</span>
+                  </div>
+                  <div class="active-voice-sub-line">
+                    <span id="activeVoiceToneBadge" class="voice-sub-pill"><i class="fa-solid fa-microphone"></i> Firm & Confident</span>
+                    <span id="activeVoiceAccentBadge" class="voice-sub-pill"><i class="fa-solid fa-earth-americas"></i> General American</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="active-voice-right">
+                <button type="button" id="btnPreviewSelectedVoice" class="btn btn-secondary btn-sm" title="Listen to active voice sample">
+                  <i class="fa-solid fa-play"></i> Preview Voice
+                </button>
+                <button type="button" id="btnToggleVoiceCatalog" class="btn btn-primary btn-sm" title="Toggle voices catalog">
+                  <i class="fa-solid fa-sliders"></i> <span id="toggleCatalogText">Hide Catalog</span> (<span id="quickTotalVoices">1,030</span>) <i class="fa-solid fa-chevron-up toggle-icon" id="toggleCatalogIcon"></i>
+                </button>
+                <button type="button" id="btnSyncVoicesApi" class="btn btn-ghost btn-sm" title="Sync latest voices directly from Google AI Studio">
+                  <i class="fa-solid fa-cloud-arrow-down"></i> Sync
+                </button>
+              </div>
+            </div>
+
+            <!-- Collapsible / Compact Voice Catalog Drawer -->
+            <div class="voice-catalog-drawer" id="voiceCatalogDrawer">
+              <div class="voice-gallery-controls">
+                <div class="voice-filter-pills">
+                  <button type="button" class="voice-filter-pill active" data-gender="all">All (<span id="countAllVoices">1030</span>)</button>
+                  <button type="button" class="voice-filter-pill" data-gender="featured">⭐ Featured (<span id="countFeaturedVoices">30</span>)</button>
+                  <button type="button" class="voice-filter-pill" data-gender="Female">👩 Female (<span id="countFemaleVoices">519</span>)</button>
+                  <button type="button" class="voice-filter-pill" data-gender="Male">👨 Male (<span id="countMaleVoices">483</span>)</button>
+                  <button type="button" class="voice-filter-pill" data-persona="Storyteller">📖 Storyteller (<span id="countStoryVoices">112</span>)</button>
+                  <button type="button" class="voice-filter-pill" data-persona="Podcast">🎙️ Podcast (<span id="countPodcastVoices">196</span>)</button>
+                  <button type="button" class="voice-filter-pill" data-persona="Dramatic">🎬 Dramatic (<span id="countDramaticVoices">14</span>)</button>
+                </div>
+
+                <div class="voice-filter-dropdowns">
+                  <select id="voicePersonaFilter" class="voice-meta-select" title="Filter by Persona / Role">
+                    <option value="all">🎭 All Personas & Roles</option>
+                    <option value="Storyteller">📖 Storyteller & Narrator</option>
+                    <option value="Podcast">🎙️ News & Podcast Host</option>
+                    <option value="Documentary">📚 Documentary</option>
+                    <option value="Commercial">⚡ Commercial & Character</option>
+                    <option value="Tutor">🎓 Educational Tutor & Guide</option>
+                    <option value="Advisor">🛡️ High-Trust Advisor & Expert</option>
+                    <option value="Coach">💪 Coach & Motivational</option>
+                    <option value="Companion">🤝 Companion & Peer</option>
+                  </select>
+
+                  <select id="voiceAccentFilter" class="voice-meta-select" title="Filter by Regional Accent">
+                    <option value="all">🌍 All Regional Accents</option>
+                    <option value="General American">🇺🇸 US - General American</option>
+                    <option value="English">🇬🇧 UK - British Accents</option>
+                    <option value="Sydney">🇦🇺 Australia (Sydney)</option>
+                    <option value="Toronto">🇨🇦 Canada (Toronto/Vancouver)</option>
+                    <option value="Dublin">🇮🇪 Ireland (Dublin)</option>
+                    <option value="Indian">🇮🇳 India (Indian English)</option>
+                    <option value="New Zealand">🇳🇿 New Zealand (Auckland)</option>
+                    <option value="Cape Town">🇿🇦 South Africa (Cape Town)</option>
+                    <option value="Arabic">🇪🇬 Arabic (Modern / Egyptian)</option>
+                    <option value="German">🇩🇪 German</option>
+                    <option value="Czech">🇨🇿 Czech</option>
+                    <option value="Greek">🇬🇷 Greek</option>
+                  </select>
+
+                  <div class="voice-search-box">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <input type="text" id="voiceSearchInput" placeholder="Search 1,000+ artists (e.g. Kore, British, Calm, Deep)...">
+                  </div>
+                </div>
+              </div>
+
+              <!-- Compact Voice Chips Grid (Clean 44px single-row chips) -->
+              <div class="voice-cards-grid compact-grid" id="voiceCardsGrid">
+                <!-- Dynamically rendered compact voice chips via app.js -->
+              </div>
+
+              <!-- Voice Pagination Bar -->
+              <div class="voice-pagination-bar" id="voicePaginationBar">
+                <span id="voicePageStatus">Showing 1-24 of 1030 voices</span>
+                <div class="voice-page-btns">
+                  <button type="button" id="btnVoicePrevPage" class="btn btn-secondary btn-sm" disabled><i class="fa-solid fa-chevron-left"></i> Prev</button>
+                  <button type="button" id="btnVoiceNextPage" class="btn btn-secondary btn-sm">Next <i class="fa-solid fa-chevron-right"></i></button>
+                </div>
+              </div>
+            </div>
+
+            <audio id="voicePreviewAudio" style="display: none;"></audio>
+          </div>
+
+          <!-- Configuration Controls Toolbar -->
+          <div class="config-grid">
+            <div class="config-group">
+              <label for="chunkMode"><i class="fa-solid fa-scissors"></i> Split Method</label>
+              <select id="chunkMode">
+                <option value="words" selected>Smart Word Limit (Recommended)</option>
+                <option value="chars">Character Count</option>
+                <option value="paragraphs">Paragraphs / Line Breaks</option>
+                <option value="dialogue">Speaker & Dialogue Tags</option>
+              </select>
+            </div>
+
+            <div class="config-group" id="limitGroup">
+              <label for="chunkLimit"><i class="fa-solid fa-sliders"></i> Target Size Per Chunk</label>
+              <div class="range-with-val">
+                <input type="range" id="chunkLimit" min="100" max="600" step="25" value="250">
+                <span id="chunkLimitValue" class="value-tag">250 words (~1.5 mins)</span>
+              </div>
+            </div>
+
+            <div class="config-group">
+              <label for="speedSelect"><i class="fa-solid fa-gauge-high"></i> Speaking Pace</label>
+              <select id="speedSelect">
+                <option value="0.8">0.8x (Deliberate & Measured)</option>
+                <option value="1.0" selected>1.0x (Standard Natural)</option>
+                <option value="1.15">1.15x (Dynamic & Engaging)</option>
+                <option value="1.25">1.25x (Brisk & Fast Tempo)</option>
+              </select>
+            </div>
+
+            <div class="config-group full-width">
+              <div class="style-presets-header">
+                <label for="promptTemplate"><i class="fa-solid fa-robot"></i> Google AI Studio Voice Direction & Style Instruction</label>
+                <div class="style-presets-pills">
+                  <span class="style-presets-label">Presets:</span>
+                  <button type="button" class="preset-pill active" data-preset="storyteller">🎙️ Storyteller</button>
+                  <button type="button" class="preset-pill" data-preset="cinematic">🎬 Dramatic</button>
+                  <button type="button" class="preset-pill" data-preset="podcast">📻 Podcast</button>
+                  <button type="button" class="preset-pill" data-preset="documentary">📚 Documentary</button>
+                  <button type="button" class="preset-pill" data-preset="whisper">🤫 Whispered</button>
+                  <button type="button" class="preset-pill" data-preset="corporate">💼 Corporate</button>
+                </div>
+              </div>
+              <input type="text" id="promptTemplate" value="Generate a natural, clear, engaging storytelling voiceover with expressive pacing, warmth, and emotion for the following text:" placeholder="Custom instruction for AI Studio...">
+            </div>
+          </div>
+
+          <div class="action-toolbar">
+            <button id="btnSplit" class="btn btn-primary btn-lg">
+              <i class="fa-solid fa-wand-magic-sparkles"></i> Split Script into Chunks
+            </button>
+            <button id="btnClear" class="btn btn-ghost">
+              <i class="fa-solid fa-trash-can"></i> Clear Input
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Workspace Panel: Chunks & Audio Management -->
+      <section class="panel workspace-panel" id="workspacePanel" style="display: none;">
+        
+        <!-- Summary & Master Timeline Bar -->
+        <div class="workspace-header">
+          <div class="workspace-stats">
+            <div class="stat-card">
+              <span class="stat-label">Total Chunks</span>
+              <span class="stat-val" id="statTotalChunks">0</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Audio Ready</span>
+              <span class="stat-val highlight" id="statReadyChunks">0 / 0</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Estimated Audio Duration</span>
+              <span class="stat-val" id="statTotalAudioTime">00:00</span>
+            </div>
+          </div>
+
+          <!-- Timeline Bar Visualizer -->
+          <div class="timeline-container">
+            <div class="timeline-label">
+              <span><i class="fa-solid fa-layer-group"></i> Chunk Audio Progress Bar</span>
+              <span id="timelinePercent">0% Complete</span>
+            </div>
+            <div class="timeline-bar" id="timelineBar">
+              <!-- Dynamically populated timeline segments -->
+            </div>
+          </div>
+
+          <!-- Master Action Bar -->
+          <div class="master-action-bar">
+            <div class="bulk-btns">
+              <button id="btnCopyAll" class="btn btn-secondary">
+                <i class="fa-solid fa-copy"></i> Copy All Formatted Chunks
+              </button>
+              <button id="btnGenerateAllApi" class="btn btn-accent" style="display: none;">
+                <i class="fa-solid fa-bolt"></i> Generate All via API
+              </button>
+              <button id="btnDownloadAllAudio" class="btn btn-secondary" title="Download all ready voiceover clips">
+                <i class="fa-solid fa-cloud-arrow-down"></i> Download All Audio
+              </button>
+              <button id="btnExportJson" class="btn btn-ghost">
+                <i class="fa-solid fa-file-export"></i> Export JSON Project
+              </button>
+            </div>
+
+            <div class="quick-config-badge-bar">
+              <div class="config-pill" id="quickModelPill" title="Active Voiceover Model">
+                <i class="fa-solid fa-microchip"></i>
+                <span id="quickModelLabel">Gemini 3.8 Flash TTS</span>
+              </div>
+              <div class="config-pill" id="quickVoicePill" title="Active Gemini Voice">
+                <i class="fa-solid fa-headset"></i>
+                <span id="quickVoiceLabel">Kore (Firm)</span>
+              </div>
+              <div class="config-pill" id="quickTempPill" title="Voiceover Temperature / Expressiveness">
+                <i class="fa-solid fa-fire"></i>
+                <span id="quickTempLabel">Temp: 1.0</span>
+              </div>
+              <div class="config-pill" id="quickMultiSpeakerPill" title="Multi-Speaker Dialogue Mode" style="display: none;">
+                <i class="fa-solid fa-people-arrows"></i>
+                <span id="quickMultiSpeakerLabel">Dual: Puck</span>
+              </div>
+              <button id="btnQuickConfig" class="btn btn-sm btn-ghost" type="button" title="Configure Model, Voice & Parameters">
+                <i class="fa-solid fa-sliders"></i> Settings
+              </button>
+            </div>
+
+            <div class="stitch-container">
+              <button id="btnStitchAudio" class="btn btn-success btn-lg" disabled>
+                <i class="fa-solid fa-object-group"></i> Stitch Master Audio Track
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Master Audio Player (When Stitched) -->
+        <div id="masterAudioCard" class="master-audio-card" style="display: none;">
+          <div class="master-audio-header">
+            <h3><i class="fa-solid fa-compact-disc spin-slow"></i> Master Combined Voiceover Track</h3>
+            <span class="duration-badge" id="masterDuration">00:00</span>
+          </div>
+          <audio id="masterAudioPlayer" controls></audio>
+          <div class="master-audio-actions">
+            <a id="btnDownloadMaster" class="btn btn-success" download="master_voiceover.wav">
+              <i class="fa-solid fa-download"></i> Download Master Audio (.wav)
+            </a>
+          </div>
+        </div>
+
+        <!-- Filter & Search Bar -->
+        <div class="chunk-search-bar">
+          <div class="search-input-wrapper">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" id="chunkSearch" placeholder="Filter chunks by text...">
+          </div>
+          <div class="filter-pills">
+            <button class="pill active" data-filter="all">All (<span id="countFilterAll">0</span>)</button>
+            <button class="pill" data-filter="pending">Pending Audio (<span id="countFilterPending">0</span>)</button>
+            <button class="pill" data-filter="ready">Ready (<span id="countFilterReady">0</span>)</button>
+          </div>
+        </div>
+
+        <!-- Dynamic List of Chunks -->
+        <div id="chunksContainer" class="chunks-container">
+          <!-- Chunk cards rendered dynamically via app.js -->
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Toast Notification Container -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <!-- API Key Settings Modal -->
+    <div id="settingsModal" class="modal-backdrop" style="display: none;">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3><i class="fa-solid fa-sliders"></i> Google AI Studio API & Voice Settings</h3>
+          <button id="btnCloseModal" class="btn-icon"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-desc">
+            Connect your Google AI Studio API Key to generate studio-grade AI voiceovers directly using Gemini's newest TTS audio models.
+          </p>
+          
+          <div class="form-group">
+            <div class="keys-header-row">
+              <label for="bulkApiKeyInput"><i class="fa-solid fa-key"></i> Google AI Studio API Keys (Bulk Paste Supported)</label>
+              <span id="detectedKeysCountBadge" class="badge-count">0 Keys</span>
+            </div>
+            <textarea id="bulkApiKeyInput" class="bulk-keys-textarea" rows="3" placeholder="Paste single or multiple Gemini API keys here (one per line, comma or space separated)...&#10;e.g.&#10;AQ.Ab8RN6...&#10;AIzaSy..."></textarea>
+            
+            <div class="keys-action-toolbar">
+              <button id="btnPasteKeysClipboard" class="btn btn-secondary btn-sm" type="button" title="Paste keys from clipboard">
+                <i class="fa-solid fa-clipboard"></i> Paste from Clipboard
+              </button>
+              <button id="btnAddBulkKeys" class="btn btn-primary btn-sm" type="button">
+                <i class="fa-solid fa-plus"></i> Detect & Add Keys
+              </button>
+              <button id="btnTestAllKeys" class="btn btn-secondary btn-sm" type="button">
+                <i class="fa-solid fa-vial-circle-check"></i> Test All Keys
+              </button>
+              <button id="btnClearAllKeys" class="btn btn-ghost btn-sm" type="button">
+                <i class="fa-solid fa-trash-can"></i> Clear All
+              </button>
+            </div>
+
+            <!-- List of detected / saved keys -->
+            <div class="saved-keys-box" id="savedKeysBox">
+              <div class="saved-keys-header">
+                <span>Active Keys Pool (<strong id="totalKeysNum">0</strong>)</span>
+                <span class="rotation-note"><i class="fa-solid fa-arrows-rotate"></i> Auto-rotates & auto-switches if 429 rate limit hit</span>
+              </div>
+              <div class="keys-chips-list" id="keysChipsList">
+                <!-- Dynamically populated key chips -->
+              </div>
+            </div>
+            <small class="help-text">Keys are auto-saved immediately and auto-rotate during voiceover generation.</small>
+          </div>
+
+          <div class="form-group">
+            <label for="modelSelect"><i class="fa-solid fa-microchip"></i> Gemini Voiceover Model</label>
+            <select id="modelSelect">
+              <!-- Populated dynamically with all new Gemini TTS/Audio models -->
+            </select>
+            <input type="text" id="customModelInput" placeholder="Enter custom model ID (e.g. gemini-2.5-flash-preview-tts)" style="display: none; margin-top: 8px;">
+            <small class="help-text" id="modelDescHelp">Selected model description</small>
+          </div>
+
+          <!-- Default Voiceover Artist Selector -->
+          <div class="form-group">
+            <label for="voiceSelect"><i class="fa-solid fa-headset"></i> Active Voiceover Artist</label>
+            <div class="voice-picker-row">
+              <select id="voiceSelect">
+                <!-- Populated dynamically with all AI Studio voices -->
+              </select>
+              <button id="btnPreviewVoice" class="btn btn-secondary btn-sm" type="button" title="Test listen to active voice">
+                <i class="fa-solid fa-volume-high"></i> Preview Active
+              </button>
+            </div>
+            <small class="help-text" id="voiceDescHelp">Tone: Firm, Clear & Professional (Default)</small>
+          </div>
+
+          <!-- AI Studio Speech Generation Parameters -->
+          <div class="form-group params-card">
+            <div class="params-section-header">
+              <div class="params-title">
+                <label><i class="fa-solid fa-sliders"></i> Google AI Studio Generation Parameters</label>
+                <span class="badge-count">Studio Settings</span>
+              </div>
+              <button type="button" id="btnResetParams" class="btn btn-ghost btn-sm" title="Reset all generation parameters to default">
+                <i class="fa-solid fa-rotate-left"></i> Reset Defaults
+              </button>
+            </div>
+
+            <!-- Parameters Grid -->
+            <div class="params-grid">
+              
+              <!-- Temperature Control -->
+              <div class="param-item">
+                <div class="param-label-row">
+                  <span class="param-name"><i class="fa-solid fa-fire"></i> Temperature (Expressiveness)</span>
+                  <span class="param-val-badge" id="tempValDisplay">1.0</span>
+                </div>
+                <input type="range" id="paramTemperature" min="0.0" max="2.0" step="0.05" value="1.0" class="param-range-slider">
+                <div class="param-scale-legend">
+                  <span>0.0 Stable/News</span>
+                  <span>1.0 Balanced</span>
+                  <span>2.0 Expressive/Drama</span>
+                </div>
+                <small class="help-text">Controls emotional nuance and inflection variety in speech delivery.</small>
+              </div>
+
+              <!-- Top-P Control -->
+              <div class="param-item">
+                <div class="param-label-row">
+                  <span class="param-name"><i class="fa-solid fa-wave-square"></i> Top-P (Nucleus Sampling)</span>
+                  <span class="param-val-badge" id="topPValDisplay">0.95</span>
+                </div>
+                <input type="range" id="paramTopP" min="0.10" max="1.00" step="0.05" value="0.95" class="param-range-slider">
+                <div class="param-scale-legend">
+                  <span>0.1 Focused</span>
+                  <span>0.95 Standard</span>
+                  <span>1.0 Diverse</span>
+                </div>
+                <small class="help-text">Controls speech token diversity and phrasing flexibility.</small>
+              </div>
+
+              <!-- Top-K Control -->
+              <div class="param-item">
+                <div class="param-label-row">
+                  <span class="param-name"><i class="fa-solid fa-filter"></i> Top-K Sampling</span>
+                  <span class="param-val-badge" id="topKValDisplay">40</span>
+                </div>
+                <input type="range" id="paramTopK" min="1" max="40" step="1" value="40" class="param-range-slider">
+                <div class="param-scale-legend">
+                  <span>1 Strict</span>
+                  <span>20 Moderate</span>
+                  <span>40 Open (Default)</span>
+                </div>
+                <small class="help-text">Caps candidate selection to highest probability tokens.</small>
+              </div>
+
+              <!-- Seed Control -->
+              <div class="param-item">
+                <div class="param-label-row">
+                  <span class="param-name"><i class="fa-solid fa-hashtag"></i> Seed (Deterministic Audio)</span>
+                  <span class="param-val-badge" id="seedValDisplay">Random</span>
+                </div>
+                <input type="number" id="paramSeed" placeholder="Optional integer (e.g. 42)" class="param-number-input" min="0" step="1">
+                <small class="help-text">Fixes random seed so identical scripts generate reproducible cadence.</small>
+              </div>
+
+            </div>
+
+            <!-- Multi-Speaker Dialogue Mode Card -->
+            <div class="multi-speaker-card">
+              <div class="multi-speaker-toggle-row">
+                <label class="toggle-switch-label" for="multiSpeakerToggle">
+                  <input type="checkbox" id="multiSpeakerToggle">
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-text">
+                    <strong><i class="fa-solid fa-people-arrows"></i> Multi-Speaker Dialogue Mode (Dual-Voice)</strong>
+                    <small>Generates alternating voices for two-speaker conversations and interviews</small>
+                  </span>
+                </label>
+              </div>
+
+              <div class="multi-speaker-settings" id="multiSpeakerSettings" style="display: none;">
+                <div class="multi-speaker-voices-row">
+                  <div class="speaker-config-col">
+                    <span class="speaker-role-tag primary"><i class="fa-solid fa-user"></i> Speaker 1 (Primary)</span>
+                    <div class="speaker-current-box" id="speaker1Display">Kore (Active Voice)</div>
+                  </div>
+                  <div class="speaker-config-col">
+                    <span class="speaker-role-tag secondary"><i class="fa-solid fa-user-plus"></i> Speaker 2 (Secondary)</span>
+                    <select id="speaker2Select" class="speaker-select">
+                      <!-- Populated dynamically with all 30 Gemini voices -->
+                    </select>
+                  </div>
+                </div>
+                <div class="dialogue-guide-box">
+                  <i class="fa-solid fa-circle-info"></i>
+                  <span>Format script with <code>Speaker 1: ... Speaker 2: ...</code> or <code>Host: ... Guest: ...</code> or <code>[Speaker 1] ... [Speaker 2]</code>.</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Custom Persona ID Input -->
+            <div class="custom-persona-row" style="margin-top: 0.85rem;">
+              <label for="paramPersonaId"><i class="fa-solid fa-id-badge"></i> Custom Voice Persona ID (Optional)</label>
+              <input type="text" id="paramPersonaId" placeholder="e.g. fine-tuned persona ID or model prefix (optional)" class="persona-input">
+              <small class="help-text">Leave blank to use prebuilt Gemini studio voices.</small>
+            </div>
+          </div>
+
+          <div class="modal-status-box" id="apiTestResult" style="display: none;">
+            <!-- Status message -->
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button id="btnTestApiKey" class="btn btn-secondary"><i class="fa-solid fa-plug"></i> Test Key</button>
+          <button id="btnSaveSettings" class="btn btn-primary"><i class="fa-solid fa-check"></i> Save Settings</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Application Scripts -->
+  <script src="js/voices-data.js"></script>
+  <script src="js/chunker.js"></script>
+  <script src="js/ai-studio.js"></script>
+  <script src="js/audio-stitcher.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
