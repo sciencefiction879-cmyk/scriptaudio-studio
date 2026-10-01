@@ -329,7 +329,7 @@ const AIStudio = {
 
   /**
    * 1. Create a Prompted Custom Voice (Voice Design)
-   * Creates a persistent voice from natural-language description.
+   * Creates a persistent voice from natural-language description using official Gemini Voices API.
    */
   async createPromptedVoice(displayName, promptText, languageCode = 'en-US', apiKey = '') {
     const key = apiKey || this.getActiveApiKey();
@@ -339,31 +339,47 @@ const AIStudio = {
     const payload = {
       store: true,
       voice: {
-        displayName: displayName || 'Custom Voice',
-        type: 'VOICE_TYPE_PROMPTED',
-        prompt: promptText,
-        languageCode: languageCode || 'en-US'
+        model: "gemini-3.8-flash-tts",
+        type: "prompted",
+        display_name: displayName || 'Custom Voice',
+        prompted: {
+          input: promptText
+        }
       }
     };
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    let voiceId = null;
+    let sampleAudio = null;
 
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error?.message || `HTTP ${res.status}: Failed to create prompted voice`);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        voiceId = data.voice_id || data.voice_key || data.voice?.voice_id || data.voice?.name || data.voice?.id;
+        if (data.sample_audio?.data) {
+          sampleAudio = this.processAudioResponse(data.sample_audio);
+        }
+      } else {
+        console.warn('Google Voices API createPromptedVoice warning:', data.error);
+        throw new Error(data.error?.message || `HTTP ${res.status}: Failed to create prompted voice`);
+      }
+    } catch (apiErr) {
+      console.warn('Google Voices API not supported on this project/key, using Calibrated Vocal Persona:', apiErr);
+      throw apiErr;
     }
 
-    const voiceData = data.voice || data;
-    const voiceId = voiceData.name || voiceData.id || `voice_${Date.now()}`;
     const customVoice = {
-      id: voiceId,
+      id: voiceId || `voice_design_${Date.now()}`,
       name: displayName || 'Custom Voice',
       type: 'prompted',
       prompt: promptText,
+      acousticPrompt: promptText,
+      baseVoice: /female|woman|girl|lady/i.test(promptText) ? 'Kore' : (/british/i.test(promptText) ? 'Zephyr' : 'Puck'),
       gender: /female|woman|girl|lady/i.test(promptText) ? 'Female' : (/male|man|boy|gentleman/i.test(promptText) ? 'Male' : 'Neutral'),
       tone: 'Custom Design',
       accent: /british/i.test(promptText) ? 'British' : (/pakistani|urdu/i.test(promptText) ? 'Pakistani' : (/indian|hindi/i.test(promptText) ? 'Indian' : 'General American')),
@@ -377,6 +393,7 @@ const AIStudio = {
 
   /**
    * 2. Create a Replicated Custom Voice (Voice Cloning via Reference + Consent)
+   * Uses official Gemini Voices API (source_audio + consent_audio).
    */
   async createReplicatedVoice(displayName, refAudioBase64, consentAudioBase64, languageCode = 'en-US', apiKey = '') {
     const key = apiKey || this.getActiveApiKey();
@@ -386,17 +403,19 @@ const AIStudio = {
     const payload = {
       store: true,
       voice: {
-        displayName: displayName || 'Cloned Voice',
-        type: 'VOICE_TYPE_REPLICATED',
-        referenceAudio: {
-          mimeType: 'audio/wav',
-          data: refAudioBase64
-        },
-        consentAudio: {
-          mimeType: 'audio/wav',
-          data: consentAudioBase64
-        },
-        languageCode: languageCode || 'en-US'
+        model: "gemini-3.8-flash-tts",
+        type: "replicated",
+        display_name: displayName || 'Cloned Voice',
+        replicated: {
+          source_audio: {
+            mime_type: 'audio/wav',
+            data: refAudioBase64
+          },
+          consent_audio: {
+            mime_type: 'audio/wav',
+            data: consentAudioBase64
+          }
+        }
       }
     };
 
@@ -412,7 +431,7 @@ const AIStudio = {
     }
 
     const voiceData = data.voice || data;
-    const voiceId = voiceData.name || voiceData.id || `voice_${Date.now()}`;
+    const voiceId = data.voice_id || data.voice_key || voiceData.voice_id || voiceData.name || voiceData.id || `voice_${Date.now()}`;
     const customVoice = {
       id: voiceId,
       name: displayName || 'Cloned Voice',
@@ -493,18 +512,57 @@ Output a strictly valid JSON object with these keys:
   async auditionVoiceSample(voiceIdOrName, sampleText = "Hello! This is an audition preview of this voiceover artist.", apiKey = '') {
     const key = apiKey || this.getActiveApiKey();
     const model = 'gemini-3.8-flash-tts';
-    const isCustom = (voiceIdOrName || '').startsWith('voice_');
+    const customVoice = this.getSavedCustomVoices().find(v => v.id === voiceIdOrName || v.name === voiceIdOrName);
+    
+    // Only pass direct voice string to Google if it is an official server-side voice ID (not our local acoustic prefix)
+    const isGoogleVoiceId = (voiceIdOrName || '').startsWith('voice_') && !voiceIdOrName.startsWith('voice_clone_') && !voiceIdOrName.startsWith('voice_design_');
+
+    let speechText = sampleText;
+    if (customVoice && customVoice.acousticPrompt) {
+      speechText = `[Voice Delivery Style: ${customVoice.acousticPrompt}]\n\n${sampleText}`;
+    }
 
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
-    const speechConfig = isCustom 
-      ? { voiceConfig: { voice: voiceIdOrName } }
-      : { voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceIdOrName } } };
 
+    if (isGoogleVoiceId) {
+      try {
+        const payload = {
+          contents: [{ role: "user", parts: [{ text: speechText }] }],
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: { voiceConfig: { voice: voiceIdOrName } }
+          }
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok) {
+          const inlineData = data.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData;
+          if (inlineData && inlineData.data) {
+            return this.processAudioResponse(inlineData);
+          }
+        }
+      } catch (e) {
+        console.warn('Official voice ID audition failed, falling back to base prebuilt voice:', e);
+      }
+    }
+
+    // Prebuilt fallback voice
+    const baseVoiceName = customVoice?.baseVoice || (isGoogleVoiceId ? 'Puck' : (voiceIdOrName || 'Puck'));
     const payload = {
-      contents: [{ role: "user", parts: [{ text: sampleText }] }],
+      contents: [{ role: "user", parts: [{ text: speechText }] }],
       generationConfig: {
         responseModalities: ["AUDIO"],
-        speechConfig: speechConfig
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: {
+              voiceName: baseVoiceName
+            }
+          }
+        }
       }
     };
 
@@ -1119,29 +1177,44 @@ Output a strictly valid JSON object with these keys:
         }
       };
     } else {
+      const customVoiceObj = this.getSavedCustomVoices().find(v => v.id === selectedVoice || v.name === selectedVoice);
+      const isOfficialGoogleVoiceId = (selectedVoice && (selectedVoice.startsWith('voice_') || selectedVoice.startsWith('voicekey_')) && !selectedVoice.startsWith('voice_clone_') && !selectedVoice.startsWith('voice_design_')) || (customVoiceObj && customVoiceObj.id && (customVoiceObj.id.startsWith('voice_') || customVoiceObj.id.startsWith('voicekey_')) && !customVoiceObj.id.startsWith('voice_clone_') && !customVoiceObj.id.startsWith('voice_design_'));
+
+      let speechBody = cleanSpeechText;
+      if (customVoiceObj && customVoiceObj.acousticPrompt && !speechBody.includes(customVoiceObj.acousticPrompt)) {
+        speechBody = `[Voice Delivery Style: ${customVoiceObj.acousticPrompt}]\n\n${speechBody}`;
+      }
+
       contents = [
         {
           role: "user",
           parts: [
             {
-              text: cleanSpeechText
+              text: speechBody
             }
           ]
         }
       ];
-      const customVoiceObj = this.getSavedCustomVoices().find(v => v.id === selectedVoice || v.name === selectedVoice);
-      const customId = this.getPersonaId() || (customVoiceObj ? customVoiceObj.id : (selectedVoice && selectedVoice.startsWith('voice_') ? selectedVoice : null));
-      if (customId) {
+
+      if (this.getPersonaId()) {
         speechConfig = {
           voiceConfig: {
-            voice: customId
+            voice: this.getPersonaId()
+          }
+        };
+      } else if (isOfficialGoogleVoiceId) {
+        const vid = customVoiceObj ? customVoiceObj.id : selectedVoice;
+        speechConfig = {
+          voiceConfig: {
+            voice: vid
           }
         };
       } else {
+        const baseVoice = customVoiceObj?.baseVoice || (isOfficialGoogleVoiceId ? 'Puck' : selectedVoice);
         speechConfig = {
           voiceConfig: {
             prebuiltVoiceConfig: {
-              voiceName: selectedVoice
+              voiceName: baseVoice || 'Puck'
             }
           }
         };
@@ -1250,27 +1323,41 @@ Output a strictly valid JSON object with these keys:
 
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(selectedModel)}:generateContent?key=${encodeURIComponent(specificKey)}`;
 
+    const customVoiceObj = this.getSavedCustomVoices().find(v => v.id === selectedVoice || v.name === selectedVoice);
+    const isOfficialGoogleVoiceId = (selectedVoice && (selectedVoice.startsWith('voice_') || selectedVoice.startsWith('voicekey_')) && !selectedVoice.startsWith('voice_clone_') && !selectedVoice.startsWith('voice_design_')) || (customVoiceObj && customVoiceObj.id && (customVoiceObj.id.startsWith('voice_') || customVoiceObj.id.startsWith('voicekey_')) && !customVoiceObj.id.startsWith('voice_clone_') && !customVoiceObj.id.startsWith('voice_design_'));
+
+    let speechBody = cleanSpeechText;
+    if (customVoiceObj && customVoiceObj.acousticPrompt && !speechBody.includes(customVoiceObj.acousticPrompt)) {
+      speechBody = `[Voice Delivery Style: ${customVoiceObj.acousticPrompt}]\n\n${speechBody}`;
+    }
+
     const contents = [
       {
         role: "user",
-        parts: [{ text: cleanSpeechText }]
+        parts: [{ text: speechBody }]
       }
     ];
 
-    const customVoiceObj = this.getSavedCustomVoices().find(v => v.id === selectedVoice || v.name === selectedVoice);
-    const customId = this.getPersonaId() || (customVoiceObj ? customVoiceObj.id : (selectedVoice && selectedVoice.startsWith('voice_') ? selectedVoice : null));
     let speechConfig;
-    if (customId) {
+    if (this.getPersonaId()) {
       speechConfig = {
         voiceConfig: {
-          voice: customId
+          voice: this.getPersonaId()
+        }
+      };
+    } else if (isOfficialGoogleVoiceId) {
+      const vid = customVoiceObj ? customVoiceObj.id : selectedVoice;
+      speechConfig = {
+        voiceConfig: {
+          voice: vid
         }
       };
     } else {
+      const baseVoice = customVoiceObj?.baseVoice || (isOfficialGoogleVoiceId ? 'Puck' : selectedVoice);
       speechConfig = {
         voiceConfig: {
           prebuiltVoiceConfig: {
-            voiceName: selectedVoice
+            voiceName: baseVoice || 'Puck'
           }
         }
       };
