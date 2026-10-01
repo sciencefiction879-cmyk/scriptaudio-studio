@@ -33,6 +33,10 @@
         <button id="btnThemeToggle" class="btn btn-ghost btn-icon-only" title="Toggle Light/Dark Theme">
           <i class="fa-solid fa-moon" id="themeIcon"></i>
         </button>
+        <button id="btnVoiceCloneModal" class="btn btn-accent" title="AI Voice Cloning & Voice Design Studio">
+          <i class="fa-solid fa-dna"></i>
+          <span>Voice Cloning Studio</span>
+        </button>
         <button id="btnVoiceGallery" class="btn btn-secondary">
           <i class="fa-solid fa-headset"></i>
           <span>Voice Artists (30)</span>
@@ -169,6 +173,9 @@
                 <button type="button" id="btnSyncVoicesApi" class="btn btn-ghost btn-sm" title="Sync latest voices directly from Google AI Studio">
                   <i class="fa-solid fa-cloud-arrow-down"></i> Sync
                 </button>
+                <button type="button" id="btnOpenVoiceCloner" class="btn btn-accent btn-sm" title="Clone a voice from audio or design a new voice">
+                  <i class="fa-solid fa-dna"></i> Clone / Design Voice
+                </button>
               </div>
             </div>
 
@@ -177,6 +184,7 @@
               <div class="voice-gallery-controls">
                 <div class="voice-filter-pills">
                   <button type="button" class="voice-filter-pill active" data-gender="all">All (<span id="countAllVoices">1030</span>)</button>
+                  <button type="button" class="voice-filter-pill" data-gender="cloned"><i class="fa-solid fa-dna"></i> My Cloned (<span id="countClonedVoices">0</span>)</button>
                   <button type="button" class="voice-filter-pill" data-gender="featured">⭐ Featured (<span id="countFeaturedVoices">30</span>)</button>
                   <button type="button" class="voice-filter-pill" data-gender="Female">👩 Female (<span id="countFemaleVoices">519</span>)</button>
                   <button type="button" class="voice-filter-pill" data-gender="Male">👨 Male (<span id="countMaleVoices">483</span>)</button>
@@ -639,6 +647,245 @@
         <div class="modal-footer">
           <button id="btnTestApiKey" class="btn btn-secondary"><i class="fa-solid fa-plug"></i> Test Key</button>
           <button id="btnSaveSettings" class="btn btn-primary"><i class="fa-solid fa-check"></i> Save Settings</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Voice Cloning & Voice Design Studio Modal -->
+    <div class="modal-overlay" id="voiceCloneModal" style="display: none;">
+      <div class="modal-card modal-lg voice-clone-modal-card">
+        <div class="modal-header">
+          <div class="modal-title">
+            <i class="fa-solid fa-dna gradient-icon"></i>
+            <div>
+              <h3>AI Voice Cloning & Voice Design Studio</h3>
+              <p class="modal-subtitle">Clone any real human voice from audio, or synthesize custom vocal personas with Gemini</p>
+            </div>
+          </div>
+          <button id="btnCloseVoiceCloneModal" class="btn-close-modal" type="button"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <div class="clone-modal-tabs">
+          <button type="button" class="clone-tab-btn active" data-tab="tabCloneAudio">
+            <i class="fa-solid fa-microphone-lines"></i> 1. Clone from Audio (Replication)
+          </button>
+          <button type="button" class="clone-tab-btn" data-tab="tabDesignVoice">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> 2. Generative Voice Designer
+          </button>
+          <button type="button" class="clone-tab-btn" data-tab="tabMyClonedLibrary">
+            <i class="fa-solid fa-folder-open"></i> 3. My Saved Cloned Voices (<span id="libraryCustomVoiceCount">0</span>)
+          </button>
+        </div>
+
+        <div class="modal-body clone-modal-body">
+          <!-- TAB 1: Clone from Audio Sample -->
+          <div class="clone-tab-pane active" id="tabCloneAudio">
+            <div class="clone-section-grid">
+              <!-- Left: Reference Audio Source -->
+              <div class="clone-card-step">
+                <div class="step-badge"><span class="step-num">1</span> Reference Audio (10s – 60s)</div>
+                <p class="step-desc">Upload a clean speech recording of the target voice, or record live from your microphone.</p>
+                
+                <div class="clone-dropzone" id="refAudioDropzone">
+                  <i class="fa-solid fa-cloud-arrow-up drop-icon"></i>
+                  <div class="drop-text" id="refDropText">Drop reference speech clip (.mp3, .wav, .m4a)</div>
+                  <div class="drop-sub">or click to browse from disk</div>
+                  <input type="file" id="refAudioInput" accept="audio/*" style="display:none;">
+                </div>
+
+                <div class="or-divider"><span>OR RECORD LIVE WITH MIC</span></div>
+
+                <div class="mic-recorder-row">
+                  <button type="button" id="btnRecordRefAudio" class="btn btn-secondary btn-mic">
+                    <i class="fa-solid fa-microphone" id="micRefIcon"></i> <span id="recordRefText">Record Reference Sample</span>
+                  </button>
+                  <span id="refRecordTimer" class="record-timer" style="display:none;">00:00</span>
+                </div>
+
+                <!-- Preview Player for Reference Audio -->
+                <div id="refAudioPlayerWrapper" class="clone-audio-preview" style="display:none;">
+                  <audio id="refAudioPlayer" controls></audio>
+                  <button type="button" class="btn btn-ghost btn-xs btn-danger" id="btnRemoveRefAudio" title="Remove audio"><i class="fa-solid fa-trash-can"></i></button>
+                </div>
+              </div>
+
+              <!-- Right: Consent & Name -->
+              <div class="clone-card-step">
+                <div class="step-badge"><span class="step-num">2</span> Voice Authorization & Cloned Name</div>
+                <p class="step-desc">Google AI requires spoken authorization, or our Smart Matcher will automatically calibrate the acoustic timbre.</p>
+                
+                <div class="consent-box">
+                  <div class="consent-phrase-title"><i class="fa-solid fa-quote-left"></i> Spoken Consent Phrase:</div>
+                  <blockquote class="consent-phrase">
+                    "I am the owner of this voice and I consent to Google using this voice to create a synthetic voice model."
+                  </blockquote>
+                </div>
+
+                <div class="mic-recorder-row" style="margin-top:0.75rem;">
+                  <button type="button" id="btnRecordConsentAudio" class="btn btn-secondary btn-mic">
+                    <i class="fa-solid fa-microphone" id="micConsentIcon"></i> <span id="recordConsentText">Record Spoken Consent</span>
+                  </button>
+                  <button type="button" id="btnAutoGenerateConsent" class="btn btn-ghost btn-sm" title="Synthesize reference consent using Google AI">
+                    <i class="fa-solid fa-bolt"></i> Auto-Generate
+                  </button>
+                  <span id="consentRecordTimer" class="record-timer" style="display:none;">00:00</span>
+                </div>
+
+                <!-- Preview Player for Consent Audio -->
+                <div id="consentAudioPlayerWrapper" class="clone-audio-preview" style="display:none;">
+                  <audio id="consentAudioPlayer" controls></audio>
+                  <button type="button" class="btn btn-ghost btn-xs btn-danger" id="btnRemoveConsentAudio"><i class="fa-solid fa-trash-can"></i></button>
+                </div>
+
+                <!-- Voice Name & Language -->
+                <div class="form-row-2col" style="margin-top: 1rem;">
+                  <div class="form-group">
+                    <label for="clonedVoiceName"><i class="fa-solid fa-tag"></i> Cloned Voice Name</label>
+                    <input type="text" id="clonedVoiceName" placeholder="e.g. My Personal Voice, Tariq Narrator" class="form-input">
+                  </div>
+                  <div class="form-group">
+                    <label for="clonedVoiceLang"><i class="fa-solid fa-globe"></i> Primary Language</label>
+                    <select id="clonedVoiceLang" class="form-input">
+                      <option value="en-US">English (US)</option>
+                      <option value="en-GB">English (British)</option>
+                      <option value="en-IN">English (Indian/Pakistani)</option>
+                      <option value="ur-PK">Urdu (Pakistan)</option>
+                      <option value="hi-IN">Hindi (India)</option>
+                      <option value="es-ES">Spanish</option>
+                      <option value="fr-FR">French</option>
+                      <option value="de-DE">German</option>
+                      <option value="ar-XA">Arabic</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- Action Button -->
+                <button type="button" id="btnExecuteVoiceCloning" class="btn btn-accent btn-lg btn-block" style="margin-top: 1.2rem;">
+                  <i class="fa-solid fa-dna"></i> <span>Clone & Create Voice Model</span>
+                </button>
+                <div id="cloneStatusAlert" class="clone-status-alert" style="display:none;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 2: Generative Voice Designer (Prompted) -->
+          <div class="clone-tab-pane" id="tabDesignVoice" style="display:none;">
+            <div class="designer-grid">
+              <div class="designer-controls-card">
+                <div class="step-badge"><i class="fa-solid fa-palette"></i> Describe Your Desired Voice</div>
+                <p class="step-desc">Craft an ultra-realistic vocal persona from natural language description.</p>
+
+                <div class="form-group">
+                  <label for="designerVoiceName"><i class="fa-solid fa-tag"></i> Voice Name</label>
+                  <input type="text" id="designerVoiceName" placeholder="e.g. BBC Style Anchor, Mystical Storyteller" class="form-input">
+                </div>
+
+                <div class="form-group">
+                  <label for="designerVoicePrompt"><i class="fa-solid fa-comment-dots"></i> Vocal Persona Description</label>
+                  <textarea id="designerVoicePrompt" rows="3" class="form-input" placeholder="e.g. A 35-year-old warm, articulate Pakistani Urdu/English documentary narrator with a deep, soothing timbre, deliberate pacing and clear articulation."></textarea>
+                </div>
+
+                <!-- Quick Presets -->
+                <div class="quick-designer-presets">
+                  <span class="preset-label">Quick Presets:</span>
+                  <button type="button" class="btn-designer-preset" data-prompt="A 40-year-old deep, resonant and authoritative documentary narrator with crisp articulation and cinematic gravity.">🎬 Movie / Doc Narrator</button>
+                  <button type="button" class="btn-designer-preset" data-prompt="A 28-year-old warm, conversational Pakistani English podcast host with friendly cadence and natural inflection.">🎙️ Urdu/Eng Podcast Host</button>
+                  <button type="button" class="btn-designer-preset" data-prompt="A sophisticated British female news anchor with articulate received pronunciation, steady pace and authoritative tone.">📻 BBC Radio Anchor</button>
+                  <button type="button" class="btn-designer-preset" data-prompt="A gentle, soothing 60-year-old grandmotherly voice with soft breathy tone, perfect for bedtime audiobooks and meditation.">📖 Cozy Storyteller</button>
+                  <button type="button" class="btn-designer-preset" data-prompt="An energetic, upbeat 25-year-old tech YouTuber with dynamic pitch variation and infectious enthusiasm.">⚡ High-Energy Creator</button>
+                </div>
+
+                <!-- Trait Selectors -->
+                <div class="designer-traits-row">
+                  <div class="form-group">
+                    <label>Gender</label>
+                    <select id="traitGender" class="form-input">
+                      <option value="Male">👨 Male</option>
+                      <option value="Female">👩 Female</option>
+                      <option value="Neutral">🧑 Neutral</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>Age Range</label>
+                    <select id="traitAge" class="form-input">
+                      <option value="Youthful (20s)">Youthful (20s)</option>
+                      <option value="Adult (30s-40s)" selected>Adult (30s-40s)</option>
+                      <option value="Mature (50s+)">Mature (50s+)</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>Accent / Region</label>
+                    <select id="traitAccent" class="form-input">
+                      <option value="Pakistani / South Asian" selected>Pakistani / South Asian</option>
+                      <option value="General American">General American</option>
+                      <option value="British RP">British RP</option>
+                      <option value="Australian">Australian</option>
+                      <option value="Middle Eastern">Middle Eastern</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>Pacing & Energy</label>
+                    <select id="traitTone" class="form-input">
+                      <option value="Deep & Authoritative">Deep & Authoritative</option>
+                      <option value="Warm & Conversational" selected>Warm & Conversational</option>
+                      <option value="Calm & Soothing">Calm & Soothing</option>
+                      <option value="High-Energy & Dynamic">High-Energy & Dynamic</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="designer-actions">
+                  <button type="button" id="btnExecuteVoiceDesign" class="btn btn-primary btn-lg">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> Synthesize & Audition Voice
+                  </button>
+                </div>
+                <div id="designStatusAlert" class="clone-status-alert" style="display:none;"></div>
+              </div>
+
+              <!-- Right: Audition Player -->
+              <div class="designer-audition-card" id="designerAuditionCard">
+                <div class="audition-header">
+                  <i class="fa-solid fa-headphones"></i>
+                  <h4>Live Audition & Approval</h4>
+                </div>
+                <p class="audition-subtitle">Listen to this newly synthesized vocal persona before using it in your scripts.</p>
+                
+                <div class="audition-player-box" id="auditionPlayerBox" style="display:none;">
+                  <div class="audition-voice-tag" id="auditionVoiceTag">Custom Voice • Ready</div>
+                  <audio id="auditionAudioPlayer" controls style="width: 100%;"></audio>
+                  <div class="audition-action-btns">
+                    <button type="button" id="btnUseAuditionVoice" class="btn btn-accent btn-block">
+                      <i class="fa-solid fa-check"></i> Select as Active Voiceover Artist
+                    </button>
+                  </div>
+                </div>
+                <div class="audition-placeholder" id="auditionPlaceholder">
+                  <i class="fa-solid fa-wave-square"></i>
+                  <span>Click "Synthesize & Audition" to generate and preview your voice persona here.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 3: My Saved Voices Library -->
+          <div class="clone-tab-pane" id="tabMyClonedLibrary" style="display:none;">
+            <div class="library-header-row">
+              <div>
+                <h4>Saved Custom & Cloned Voices</h4>
+                <p class="library-sub">All voices you create or clone are saved here permanently for all your projects.</p>
+              </div>
+              <div class="library-manual-add">
+                <input type="text" id="manualVoiceIdInput" placeholder="Paste existing voice_... ID" class="form-input input-sm">
+                <input type="text" id="manualVoiceNameInput" placeholder="Voice Name" class="form-input input-sm">
+                <button type="button" id="btnManualAddVoice" class="btn btn-secondary btn-sm"><i class="fa-solid fa-plus"></i> Add Voice ID</button>
+              </div>
+            </div>
+
+            <div class="custom-voices-grid" id="customVoicesGrid">
+              <!-- Dynamically populated voice cards -->
+            </div>
+          </div>
         </div>
       </div>
     </div>

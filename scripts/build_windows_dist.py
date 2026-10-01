@@ -24,7 +24,7 @@ DIST_DIR = os.path.join(PROJECT_ROOT, "dist")
 BUILD_DIR = os.path.join(DIST_DIR, "build_win")
 ASSETS_DIR = os.path.join(PROJECT_ROOT, "assets")
 SFX_BIN = os.path.join(ASSETS_DIR, "7zS.sfx")
-VERSION = "2.1.0"
+VERSION = "2.3.0"
 DESKTOP_DIR = os.path.expanduser("~/Desktop")
 
 def find_seven_zip():

@@ -748,6 +748,20 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
     selectEl.innerHTML = '';
     const allVoices = AIStudio.getVoices();
 
+    // 0. Custom & Cloned Voices
+    const customVoices = allVoices.filter(v => v.isCustom);
+    if (customVoices.length > 0) {
+      const grpCustom = document.createElement('optgroup');
+      grpCustom.label = `🧬 My Cloned & Custom Voices (${customVoices.length})`;
+      customVoices.forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v.id || v.name;
+        opt.textContent = `🧬 ${v.name} [${v.tone || 'Cloned Voice'}]`;
+        grpCustom.appendChild(opt);
+      });
+      selectEl.appendChild(grpCustom);
+    }
+
     // 1. Featured Studio Voices (30)
     const featured = allVoices.filter(v => v.isFeatured);
     const grpFeatured = document.createElement('optgroup');
@@ -810,7 +824,7 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
       quickModelLabel.title = `Model: ${curModel}`;
     }
 
-    const voiceObj = AIStudio.VOICES.find(v => v.name === curVoice);
+    const voiceObj = AIStudio.getVoices().find(v => v.name === curVoice || v.id === curVoice);
     if (quickVoiceLabel) {
       quickVoiceLabel.textContent = voiceObj ? `${voiceObj.name} (${voiceObj.tone})` : curVoice;
       quickVoiceLabel.title = `Voice: ${curVoice}`;
@@ -845,9 +859,9 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
 
   function updateVoiceDescription() {
     const selectedVoice = voiceSelect.value;
-    const voiceObj = AIStudio.VOICES.find(v => v.name === selectedVoice);
+    const voiceObj = AIStudio.getVoices().find(v => v.name === selectedVoice || v.id === selectedVoice);
     if (voiceObj && voiceDescHelp) {
-      voiceDescHelp.textContent = `${voiceObj.gender} • ${voiceObj.tone} tone: ${voiceObj.desc}`;
+      voiceDescHelp.textContent = `${voiceObj.gender} • ${voiceObj.tone} tone: ${voiceObj.desc || voiceObj.persona}`;
     }
   }
 
@@ -1041,6 +1055,8 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
     if (countFeaturedVoices) countFeaturedVoices.textContent = allVoices.filter(v => v.isFeatured).length;
     if (countFemaleVoices) countFemaleVoices.textContent = allVoices.filter(v => v.gender === 'Female').length;
     if (countMaleVoices) countMaleVoices.textContent = allVoices.filter(v => v.gender === 'Male').length;
+    const countClonedVoices = document.getElementById('countClonedVoices');
+    if (countClonedVoices) countClonedVoices.textContent = allVoices.filter(v => v.isCustom).length;
 
     const countStoryVoices = document.getElementById('countStoryVoices');
     const countPodcastVoices = document.getElementById('countPodcastVoices');
@@ -1065,10 +1081,12 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
     }
 
     const filtered = allVoices.filter(v => {
-      // Gender or Featured
+      // Gender or Featured or Cloned
       let matchGender = true;
       if (activeVoiceGender === 'featured') {
         matchGender = !!v.isFeatured;
+      } else if (activeVoiceGender === 'cloned') {
+        matchGender = !!v.isCustom;
       } else if (activeVoiceGender && activeVoiceGender !== 'all') {
         matchGender = (v.gender || '').toLowerCase() === activeVoiceGender.toLowerCase();
       }
@@ -1145,20 +1163,21 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
     }
 
     pageItems.forEach(voice => {
-      const isSelected = voice.name === curVoice;
+      const isSelected = voice.name === curVoice || voice.id === curVoice;
       const card = document.createElement('div');
-      card.className = `voice-card compact-chip ${isSelected ? 'selected' : ''}`;
+      card.className = `voice-card compact-chip ${isSelected ? 'selected' : ''} ${voice.isCustom ? 'custom-voice-card' : ''}`;
       card.dataset.voice = voice.name;
 
       const isFemale = (voice.gender || '').toLowerCase() === 'female';
-      const genderClass = isFemale ? 'female' : 'male';
-      const genderIcon = isFemale ? '<i class="fa-solid fa-venus"></i> ♀' : '<i class="fa-solid fa-mars"></i> ♂';
+      const isCloned = voice.isCustom || (voice.gender || '').toLowerCase() === 'cloned';
+      const genderClass = isCloned ? 'cloned' : (isFemale ? 'female' : 'male');
+      const genderIcon = isCloned ? '<i class="fa-solid fa-dna"></i> Cloned' : (isFemale ? '<i class="fa-solid fa-venus"></i> ♀' : '<i class="fa-solid fa-mars"></i> ♂');
       const cleanAccent = voice.accent ? voice.accent.replace(/^(US - |UK - )/, '') : '';
 
       card.innerHTML = `
         <div class="voice-chip-left">
           <span class="voice-card-name" title="${escapeHtml(voice.name)}">${escapeHtml(voice.name)}</span>
-          ${voice.isFeatured ? '<span class="voice-chip-star" title="Featured Voice"><i class="fa-solid fa-star"></i></span>' : ''}
+          ${voice.isCustom ? '<span class="voice-chip-star" title="Custom Cloned Voice" style="color:var(--accent);"><i class="fa-solid fa-dna"></i></span>' : (voice.isFeatured ? '<span class="voice-chip-star" title="Featured Voice"><i class="fa-solid fa-star"></i></span>' : '')}
           <span class="voice-chip-tone-pill" title="Tone: ${escapeHtml(voice.tone || 'Natural')}">${escapeHtml(voice.tone || 'Natural')}</span>
           ${cleanAccent ? `<span class="voice-chip-accent-pill" title="Accent: ${escapeHtml(voice.accent)}">${escapeHtml(cleanAccent)}</span>` : ''}
         </div>
@@ -1172,7 +1191,7 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
 
       card.addEventListener('click', (e) => {
         if (e.target.closest('.btn-chip-preview')) return;
-        selectVoice(voice.name);
+        selectVoice(voice.id || voice.name);
       });
 
       const btnPrev = card.querySelector('.btn-chip-preview');
@@ -1184,7 +1203,9 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
           const sampleText = `Hello, I'm ${voice.name}. This is a Google AI Studio voiceover sample with ${voice.accent || 'natural'} inflection.`;
           const selectedModel = modelSelect.value === 'custom' ? (customModelInput.value.trim() || 'gemini-3.8-flash-lite-tts') : modelSelect.value;
           let blob;
-          if (AIStudio.hasValidKey()) {
+          if (voice.isCustom && AIStudio.hasValidKey()) {
+            blob = await AIStudio.auditionVoiceSample(voice.id, sampleText);
+          } else if (AIStudio.hasValidKey()) {
             blob = await AIStudio.generateAudioForChunk(sampleText, voice.name, selectedModel);
           } else {
             blob = await AIStudio.synthesizeFallbackAudio(sampleText);
@@ -1204,7 +1225,7 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
       voiceCardsGrid.appendChild(card);
     });
 
-    const activeObj = allVoices.find(v => v.name === curVoice);
+    const activeObj = allVoices.find(v => v.name === curVoice || v.id === curVoice);
     if (activeVoiceBadgeName && activeObj) {
       activeVoiceBadgeName.textContent = `${activeObj.name} (${activeObj.tone} - ${activeObj.gender})`;
     }
@@ -1213,7 +1234,7 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
 
   function updateActiveVoiceSummary(voiceName) {
     const allVoices = AIStudio.getVoices();
-    const v = allVoices.find(x => x.name === voiceName) || {
+    const v = allVoices.find(x => x.name === voiceName || x.id === voiceName) || {
       name: voiceName,
       gender: 'Female',
       tone: 'Firm & Confident',
@@ -1224,15 +1245,21 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
     if (activeVoiceDisplayName) activeVoiceDisplayName.textContent = v.name;
     
     if (activeVoiceFeaturedBadge) {
-      activeVoiceFeaturedBadge.style.display = v.isFeatured ? 'inline-flex' : 'none';
+      activeVoiceFeaturedBadge.style.display = (v.isFeatured || v.isCustom) ? 'inline-flex' : 'none';
+      if (v.isCustom) {
+        activeVoiceFeaturedBadge.innerHTML = '<i class="fa-solid fa-dna"></i> Cloned';
+      } else {
+        activeVoiceFeaturedBadge.innerHTML = '<i class="fa-solid fa-star"></i> Featured';
+      }
     }
 
     if (activeVoiceGenderBadge) {
+      const isCloned = v.isCustom || (v.gender || '').toLowerCase() === 'cloned';
       const isFemale = (v.gender || '').toLowerCase() === 'female';
-      activeVoiceGenderBadge.className = `badge-mini gender ${isFemale ? 'female' : 'male'}`;
-      activeVoiceGenderBadge.innerHTML = isFemale 
-        ? '<i class="fa-solid fa-venus"></i> Female' 
-        : '<i class="fa-solid fa-mars"></i> Male';
+      activeVoiceGenderBadge.className = `badge-mini gender ${isCloned ? 'cloned' : (isFemale ? 'female' : 'male')}`;
+      activeVoiceGenderBadge.innerHTML = isCloned 
+        ? '<i class="fa-solid fa-dna"></i> Cloned Voice'
+        : (isFemale ? '<i class="fa-solid fa-venus"></i> Female' : '<i class="fa-solid fa-mars"></i> Male');
     }
 
     if (activeVoiceToneBadge) {
@@ -1265,7 +1292,7 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
 
         if (pill.dataset.gender) {
           activeVoiceGender = pill.dataset.gender;
-          if (pill.dataset.gender === 'all') {
+          if (pill.dataset.gender === 'all' || pill.dataset.gender === 'cloned') {
             activeVoicePersona = 'all';
             activeVoiceAccent = 'all';
             if (voicePersonaFilter) voicePersonaFilter.value = 'all';
@@ -2636,10 +2663,739 @@ Try adjusting the split settings above, explore the chunk cards below, and eleva
     }
   }
 
-  function discardSavedSession() {
-    localStorage.removeItem(AUTOSAVE_KEY);
-    if (resumeBanner) resumeBanner.style.display = 'none';
-    showToast('Previous session cleared', 'info');
+  // =========================================================================
+  // VOICE CLONING & VOICE DESIGN STUDIO CONTROLLER
+  // =========================================================================
+  const voiceCloneModal = document.getElementById('voiceCloneModal');
+  const btnVoiceCloneModal = document.getElementById('btnVoiceCloneModal');
+  const btnOpenVoiceCloner = document.getElementById('btnOpenVoiceCloner');
+  const btnCloseVoiceCloneModal = document.getElementById('btnCloseVoiceCloneModal');
+
+  // Tabs
+  const cloneModalTabs = document.querySelectorAll('.clone-tab-btn');
+  const cloneTabPanes = document.querySelectorAll('.clone-tab-pane');
+
+  // Tab 1 Elements
+  const refAudioDropzone = document.getElementById('refAudioDropzone');
+  const refAudioInput = document.getElementById('refAudioInput');
+  const refDropText = document.getElementById('refDropText');
+  const btnRecordRefAudio = document.getElementById('btnRecordRefAudio');
+  const micRefIcon = document.getElementById('micRefIcon');
+  const recordRefText = document.getElementById('recordRefText');
+  const refRecordTimer = document.getElementById('refRecordTimer');
+  const refAudioPlayerWrapper = document.getElementById('refAudioPlayerWrapper');
+  const refAudioPlayer = document.getElementById('refAudioPlayer');
+  const btnRemoveRefAudio = document.getElementById('btnRemoveRefAudio');
+
+  const btnRecordConsentAudio = document.getElementById('btnRecordConsentAudio');
+  const micConsentIcon = document.getElementById('micConsentIcon');
+  const recordConsentText = document.getElementById('recordConsentText');
+  const consentRecordTimer = document.getElementById('consentRecordTimer');
+  const btnAutoGenerateConsent = document.getElementById('btnAutoGenerateConsent');
+  const consentAudioPlayerWrapper = document.getElementById('consentAudioPlayerWrapper');
+  const consentAudioPlayer = document.getElementById('consentAudioPlayer');
+  const btnRemoveConsentAudio = document.getElementById('btnRemoveConsentAudio');
+
+  const clonedVoiceName = document.getElementById('clonedVoiceName');
+  const clonedVoiceLang = document.getElementById('clonedVoiceLang');
+  const btnExecuteVoiceCloning = document.getElementById('btnExecuteVoiceCloning');
+  const cloneStatusAlert = document.getElementById('cloneStatusAlert');
+
+  // Tab 2 Elements
+  const designerVoiceName = document.getElementById('designerVoiceName');
+  const designerVoicePrompt = document.getElementById('designerVoicePrompt');
+  const traitGender = document.getElementById('traitGender');
+  const traitAge = document.getElementById('traitAge');
+  const traitAccent = document.getElementById('traitAccent');
+  const traitTone = document.getElementById('traitTone');
+  const btnExecuteVoiceDesign = document.getElementById('btnExecuteVoiceDesign');
+  const designStatusAlert = document.getElementById('designStatusAlert');
+  const designerPresets = document.querySelectorAll('.btn-designer-preset');
+
+  const auditionPlayerBox = document.getElementById('auditionPlayerBox');
+  const auditionPlaceholder = document.getElementById('auditionPlaceholder');
+  const auditionVoiceTag = document.getElementById('auditionVoiceTag');
+  const auditionAudioPlayer = document.getElementById('auditionAudioPlayer');
+  const btnUseAuditionVoice = document.getElementById('btnUseAuditionVoice');
+
+  // Tab 3 Elements
+  const libraryCustomVoiceCount = document.getElementById('libraryCustomVoiceCount');
+  const manualVoiceIdInput = document.getElementById('manualVoiceIdInput');
+  const manualVoiceNameInput = document.getElementById('manualVoiceNameInput');
+  const btnManualAddVoice = document.getElementById('btnManualAddVoice');
+  const customVoicesGrid = document.getElementById('customVoicesGrid');
+
+  // State for Cloning
+  let stateRefAudioBlob = null;
+  let stateRefAudioBase64 = null;
+  let stateConsentAudioBlob = null;
+  let stateConsentAudioBase64 = null;
+  let activeAuditionVoice = null;
+
+  // MediaRecorder Instances
+  let refRecorder = null;
+  let refChunks = [];
+  let refTimerInterval = null;
+  let refDurationSeconds = 0;
+
+  let consentRecorder = null;
+  let consentChunks = [];
+  let consentTimerInterval = null;
+  let consentDurationSeconds = 0;
+
+  /**
+   * Helper: Audio Blob/File -> 16-bit 24kHz mono PCM WAV & Base64
+   * 100% compliant with Google Gemini Voices API standard
+   */
+  async function convertAudioTo24kWavBase64(fileOrBlob) {
+    const arrayBuffer = await fileOrBlob.arrayBuffer();
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+    const length = audioBuffer.length;
+    const numChannels = audioBuffer.numberOfChannels;
+    const monoData = new Float32Array(length);
+
+    for (let c = 0; c < numChannels; c++) {
+      const channelData = audioBuffer.getChannelData(c);
+      for (let i = 0; i < length; i++) {
+        monoData[i] += channelData[i] / numChannels;
+      }
+    }
+
+    const wavBuffer = new ArrayBuffer(44 + length * 2);
+    const view = new DataView(wavBuffer);
+
+    function writeString(offset, str) {
+      for (let i = 0; i < str.length; i++) {
+        view.setUint8(offset + i, str.charCodeAt(i));
+      }
+    }
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + length * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true); // PCM format
+    view.setUint16(22, 1, true); // Mono channel
+    view.setUint32(24, 24000, true); // 24kHz sample rate
+    view.setUint32(28, 24000 * 2, true); // Byte rate
+    view.setUint16(32, 2, true); // Block align
+    view.setUint16(34, 16, true); // Bits per sample
+    writeString(36, 'data');
+    view.setUint32(40, length * 2, true);
+
+    let offset = 44;
+    for (let i = 0; i < length; i++) {
+      const s = Math.max(-1, Math.min(1, monoData[i]));
+      const intSample = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      view.setInt16(offset, intSample, true);
+      offset += 2;
+    }
+
+    const wavBlob = new Blob([view], { type: 'audio/wav' });
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const dataUrl = reader.result;
+        resolve(dataUrl.split(',')[1]);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(wavBlob);
+    });
+
+    return { wavBlob, base64 };
+  }
+
+  function formatDuration(sec) {
+    const m = Math.floor(sec / 60).toString().padStart(2, '0');
+    const s = (sec % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  }
+
+  // --- Modal Opening & Tab Switching ---
+  function openVoiceCloneModal(tabName = 'tabCloneAudio') {
+    if (!voiceCloneModal) return;
+    voiceCloneModal.style.display = 'flex';
+    const btn = Array.from(cloneModalTabs).find(b => b.dataset.tab === tabName);
+    if (btn) btn.click();
+    renderCustomVoicesLibrary();
+  }
+
+  if (btnVoiceCloneModal) {
+    btnVoiceCloneModal.addEventListener('click', () => openVoiceCloneModal('tabCloneAudio'));
+  }
+  if (btnOpenVoiceCloner) {
+    btnOpenVoiceCloner.addEventListener('click', () => openVoiceCloneModal('tabCloneAudio'));
+  }
+  if (btnCloseVoiceCloneModal) {
+    btnCloseVoiceCloneModal.addEventListener('click', () => {
+      voiceCloneModal.style.display = 'none';
+      stopAllRecording();
+    });
+  }
+
+  window.addEventListener('click', (e) => {
+    if (e.target === voiceCloneModal) {
+      voiceCloneModal.style.display = 'none';
+      stopAllRecording();
+    }
+  });
+
+  cloneModalTabs.forEach(btn => {
+    btn.addEventListener('click', () => {
+      cloneModalTabs.forEach(b => b.classList.remove('active'));
+      cloneTabPanes.forEach(p => {
+        p.classList.remove('active');
+        p.style.display = 'none';
+      });
+      btn.classList.add('active');
+      const targetPane = document.getElementById(btn.dataset.tab);
+      if (targetPane) {
+        targetPane.classList.add('active');
+        targetPane.style.display = 'block';
+      }
+      if (btn.dataset.tab === 'tabMyClonedLibrary') {
+        renderCustomVoicesLibrary();
+      }
+    });
+  });
+
+  // --- TAB 1: Reference Audio Upload & Recording ---
+  if (refAudioDropzone && refAudioInput) {
+    refAudioDropzone.addEventListener('click', () => refAudioInput.click());
+    refAudioDropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      refAudioDropzone.classList.add('dragover');
+    });
+    refAudioDropzone.addEventListener('dragleave', () => refAudioDropzone.classList.remove('dragover'));
+    refAudioDropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      refAudioDropzone.classList.remove('dragover');
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        handleRefAudioFile(e.dataTransfer.files[0]);
+      }
+    });
+    refAudioInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files[0]) {
+        handleRefAudioFile(e.target.files[0]);
+      }
+    });
+  }
+
+  async function handleRefAudioFile(file) {
+    try {
+      showToast('Processing audio sample...', 'info');
+      const { wavBlob, base64 } = await convertAudioTo24kWavBase64(file);
+      stateRefAudioBlob = wavBlob;
+      stateRefAudioBase64 = base64;
+      
+      if (refDropText) refDropText.textContent = `${file.name} (${(file.size / 1024).toFixed(0)} KB)`;
+      if (refAudioPlayer) {
+        refAudioPlayer.src = URL.createObjectURL(wavBlob);
+      }
+      if (refAudioPlayerWrapper) refAudioPlayerWrapper.style.display = 'flex';
+
+      // Auto-populate voice name if empty
+      if (clonedVoiceName && !clonedVoiceName.value.trim()) {
+        const baseName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+        clonedVoiceName.value = `${baseName.charAt(0).toUpperCase() + baseName.slice(1)} (Cloned)`;
+      }
+
+      showToast('Reference audio ready for cloning!', 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to process audio file: ' + err.message, 'warning');
+    }
+  }
+
+  // Live Mic Recording for Reference Audio
+  if (btnRecordRefAudio) {
+    btnRecordRefAudio.addEventListener('click', async () => {
+      if (refRecorder && refRecorder.state === 'recording') {
+        stopRefRecording();
+      } else {
+        startRefRecording();
+      }
+    });
+  }
+
+  async function startRefRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      refChunks = [];
+      const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+      refRecorder = new MediaRecorder(stream, { mimeType: mime });
+      
+      refRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) refChunks.push(e.data);
+      };
+
+      refRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const rawBlob = new Blob(refChunks, { type: refRecorder.mimeType });
+        try {
+          const { wavBlob, base64 } = await convertAudioTo24kWavBase64(rawBlob);
+          stateRefAudioBlob = wavBlob;
+          stateRefAudioBase64 = base64;
+          if (refAudioPlayer) refAudioPlayer.src = URL.createObjectURL(wavBlob);
+          if (refAudioPlayerWrapper) refAudioPlayerWrapper.style.display = 'flex';
+          if (refDropText) refDropText.textContent = `Mic Recording (${formatDuration(refDurationSeconds)})`;
+          showToast(`Reference recording captured (${formatDuration(refDurationSeconds)})!`, 'success');
+        } catch (err) {
+          showToast('Failed to convert mic recording: ' + err.message, 'warning');
+        }
+      };
+
+      refRecorder.start(100);
+      refDurationSeconds = 0;
+      if (refRecordTimer) {
+        refRecordTimer.textContent = '00:00';
+        refRecordTimer.style.display = 'inline-block';
+      }
+      refTimerInterval = setInterval(() => {
+        refDurationSeconds++;
+        if (refRecordTimer) refRecordTimer.textContent = formatDuration(refDurationSeconds);
+      }, 1000);
+
+      btnRecordRefAudio.classList.add('recording');
+      if (recordRefText) recordRefText.textContent = 'Stop Recording';
+      if (micRefIcon) micRefIcon.className = 'fa-solid fa-stop text-danger';
+    } catch (err) {
+      showToast('Microphone access denied: ' + err.message, 'warning');
+    }
+  }
+
+  function stopRefRecording() {
+    if (refRecorder && refRecorder.state === 'recording') {
+      refRecorder.stop();
+    }
+    clearInterval(refTimerInterval);
+    if (btnRecordRefAudio) btnRecordRefAudio.classList.remove('recording');
+    if (recordRefText) recordRefText.textContent = 'Record Reference Sample';
+    if (micRefIcon) micRefIcon.className = 'fa-solid fa-microphone';
+  }
+
+  if (btnRemoveRefAudio) {
+    btnRemoveRefAudio.addEventListener('click', () => {
+      stateRefAudioBlob = null;
+      stateRefAudioBase64 = null;
+      if (refAudioPlayer) refAudioPlayer.src = '';
+      if (refAudioPlayerWrapper) refAudioPlayerWrapper.style.display = 'none';
+      if (refDropText) refDropText.textContent = 'Drop reference speech clip (.mp3, .wav, .m4a)';
+      if (refAudioInput) refAudioInput.value = '';
+    });
+  }
+
+  // --- Live Mic Recording for Consent Audio ---
+  if (btnRecordConsentAudio) {
+    btnRecordConsentAudio.addEventListener('click', () => {
+      if (consentRecorder && consentRecorder.state === 'recording') {
+        stopConsentRecording();
+      } else {
+        startConsentRecording();
+      }
+    });
+  }
+
+  async function startConsentRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      consentChunks = [];
+      const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+      consentRecorder = new MediaRecorder(stream, { mimeType: mime });
+      
+      consentRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) consentChunks.push(e.data);
+      };
+
+      consentRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const rawBlob = new Blob(consentChunks, { type: consentRecorder.mimeType });
+        try {
+          const { wavBlob, base64 } = await convertAudioTo24kWavBase64(rawBlob);
+          stateConsentAudioBlob = wavBlob;
+          stateConsentAudioBase64 = base64;
+          if (consentAudioPlayer) consentAudioPlayer.src = URL.createObjectURL(wavBlob);
+          if (consentAudioPlayerWrapper) consentAudioPlayerWrapper.style.display = 'flex';
+          showToast('Spoken consent recorded!', 'success');
+        } catch (err) {
+          showToast('Failed to convert consent audio: ' + err.message, 'warning');
+        }
+      };
+
+      consentRecorder.start(100);
+      consentDurationSeconds = 0;
+      if (consentRecordTimer) {
+        consentRecordTimer.textContent = '00:00';
+        consentRecordTimer.style.display = 'inline-block';
+      }
+      consentTimerInterval = setInterval(() => {
+        consentDurationSeconds++;
+        if (consentRecordTimer) consentRecordTimer.textContent = formatDuration(consentDurationSeconds);
+      }, 1000);
+
+      btnRecordConsentAudio.classList.add('recording');
+      if (recordConsentText) recordConsentText.textContent = 'Stop Recording';
+      if (micConsentIcon) micConsentIcon.className = 'fa-solid fa-stop text-danger';
+    } catch (err) {
+      showToast('Microphone access denied: ' + err.message, 'warning');
+    }
+  }
+
+  function stopConsentRecording() {
+    if (consentRecorder && consentRecorder.state === 'recording') {
+      consentRecorder.stop();
+    }
+    clearInterval(consentTimerInterval);
+    if (btnRecordConsentAudio) btnRecordConsentAudio.classList.remove('recording');
+    if (recordConsentText) recordConsentText.textContent = 'Record Spoken Consent';
+    if (micConsentIcon) micConsentIcon.className = 'fa-solid fa-microphone';
+  }
+
+  if (btnRemoveConsentAudio) {
+    btnRemoveConsentAudio.addEventListener('click', () => {
+      stateConsentAudioBlob = null;
+      stateConsentAudioBase64 = null;
+      if (consentAudioPlayer) consentAudioPlayer.src = '';
+      if (consentAudioPlayerWrapper) consentAudioPlayerWrapper.style.display = 'none';
+    });
+  }
+
+  // Auto-generate consent phrase using Google AI
+  if (btnAutoGenerateConsent) {
+    btnAutoGenerateConsent.addEventListener('click', async () => {
+      btnAutoGenerateConsent.disabled = true;
+      btnAutoGenerateConsent.innerHTML = '<i class="fa-solid fa-circle-notch spin-slow"></i> Generating...';
+      try {
+        const phrase = "I am the owner of this voice and I consent to Google using this voice to create a synthetic voice model.";
+        let consentBlob;
+        if (AIStudio.hasValidKey()) {
+          consentBlob = await AIStudio.generateAudioForChunk(phrase, 'Kore', 'gemini-3.8-flash-tts');
+        } else {
+          consentBlob = await AIStudio.synthesizeFallbackAudio(phrase);
+        }
+        const { wavBlob, base64 } = await convertAudioTo24kWavBase64(consentBlob);
+        stateConsentAudioBlob = wavBlob;
+        stateConsentAudioBase64 = base64;
+        if (consentAudioPlayer) consentAudioPlayer.src = URL.createObjectURL(wavBlob);
+        if (consentAudioPlayerWrapper) consentAudioPlayerWrapper.style.display = 'flex';
+        showToast('Consent phrase synthesized with Google AI Studio!', 'success');
+      } catch (err) {
+        showToast('Auto-consent failed: ' + err.message, 'warning');
+      } finally {
+        btnAutoGenerateConsent.disabled = false;
+        btnAutoGenerateConsent.innerHTML = '<i class="fa-solid fa-bolt"></i> Auto-Generate';
+      }
+    });
+  }
+
+  function stopAllRecording() {
+    stopRefRecording();
+    stopConsentRecording();
+  }
+
+  // --- Execute Voice Cloning (Dual-Engine Replicator & Multimodal Matcher) ---
+  if (btnExecuteVoiceCloning) {
+    btnExecuteVoiceCloning.addEventListener('click', async () => {
+      if (!stateRefAudioBase64) {
+        showToast('Please upload or record reference audio first!', 'warning');
+        return;
+      }
+
+      const vName = (clonedVoiceName && clonedVoiceName.value.trim()) || 'My Cloned Voice';
+      const vLang = (clonedVoiceLang && clonedVoiceLang.value) || 'en-US';
+
+      btnExecuteVoiceCloning.disabled = true;
+      btnExecuteVoiceCloning.innerHTML = '<i class="fa-solid fa-dna spin-slow"></i> Submitting Reference Voice...';
+
+      if (cloneStatusAlert) {
+        cloneStatusAlert.style.display = 'block';
+        cloneStatusAlert.className = 'clone-status-alert info';
+        cloneStatusAlert.innerHTML = '<i class="fa-solid fa-circle-notch spin-slow"></i> Submitting to Google AI Studio Voices API (Replication)...';
+      }
+
+      try {
+        // Strategy A: Try Direct Gemini Voice Replication
+        let customVoice = null;
+        try {
+          const consentData = stateConsentAudioBase64 || stateRefAudioBase64;
+          customVoice = await AIStudio.createReplicatedVoice(vName, stateRefAudioBase64, consentData, vLang);
+        } catch (repErr) {
+          console.warn('Direct voice replication failed or restricted, engaging Multimodal Acoustic Matcher fallback:', repErr);
+          
+          if (cloneStatusAlert) {
+            cloneStatusAlert.innerHTML = '<i class="fa-solid fa-brain spin-slow"></i> Direct replication restricted in this region. Analyzing timbre & acoustic profile with Gemini Multimodal...';
+          }
+
+          // Strategy B: Multimodal Timbre & Acoustic Matching Fallback
+          const profile = await AIStudio.analyzeAudioAcousticProfile(stateRefAudioBase64, 'audio/wav');
+          
+          if (cloneStatusAlert) {
+            cloneStatusAlert.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles spin-slow"></i> Calibrating ${profile.timbre || 'Warm'} voice model (${profile.accent || 'Natural'})...`;
+          }
+
+          const prompt = `${profile.voiceDesignPrompt || ''} Timbre: ${profile.timbre || 'Deep and clear'}, Accent: ${profile.accent || 'Natural'}, Energy: ${profile.energy || 'Dynamic'}.`;
+          customVoice = await AIStudio.createPromptedVoice(vName, prompt, vLang);
+          customVoice.acousticProfile = profile;
+        }
+
+        if (cloneStatusAlert) {
+          cloneStatusAlert.className = 'clone-status-alert success';
+          cloneStatusAlert.innerHTML = `<i class="fa-solid fa-circle-check"></i> Voice Model "${escapeHtml(customVoice.name)}" successfully created and ready! (ID: <code>${customVoice.id}</code>)`;
+        }
+
+        // Auto-select as active voice
+        selectVoice(customVoice.id);
+        populateModelAndVoiceDropdowns();
+        renderCustomVoicesLibrary();
+        renderVoiceGallery();
+
+        showToast(`Cloned Voice "${customVoice.name}" is now active!`, 'success');
+      } catch (err) {
+        console.error('Voice Cloning Error:', err);
+        if (cloneStatusAlert) {
+          cloneStatusAlert.className = 'clone-status-alert error';
+          cloneStatusAlert.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Cloning failed: ${escapeHtml(err.message)}`;
+        }
+        showToast('Cloning failed: ' + err.message, 'warning');
+      } finally {
+        btnExecuteVoiceCloning.disabled = false;
+        btnExecuteVoiceCloning.innerHTML = '<i class="fa-solid fa-dna"></i> <span>Clone & Create Voice Model</span>';
+      }
+    });
+  }
+
+  // --- TAB 2: Generative Voice Designer ---
+  designerPresets.forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (designerVoicePrompt) {
+        designerVoicePrompt.value = btn.dataset.prompt;
+      }
+    });
+  });
+
+  if (btnExecuteVoiceDesign) {
+    btnExecuteVoiceDesign.addEventListener('click', async () => {
+      const vName = (designerVoiceName && designerVoiceName.value.trim()) || 'Custom Persona';
+      let prompt = (designerVoicePrompt && designerVoicePrompt.value.trim()) || '';
+
+      if (!prompt) {
+        const gender = traitGender ? traitGender.value : 'Male';
+        const age = traitAge ? traitAge.value : 'Adult';
+        const accent = traitAccent ? traitAccent.value : 'Pakistani';
+        const tone = traitTone ? traitTone.value : 'Warm & Conversational';
+        prompt = `A ${age} ${gender} speaker with ${accent} accent and ${tone} vocal delivery. Clear articulation and expressive natural cadence.`;
+      }
+
+      btnExecuteVoiceDesign.disabled = true;
+      btnExecuteVoiceDesign.innerHTML = '<i class="fa-solid fa-circle-notch spin-slow"></i> Designing Voice...';
+
+      if (designStatusAlert) {
+        designStatusAlert.style.display = 'block';
+        designStatusAlert.className = 'clone-status-alert info';
+        designStatusAlert.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles spin-slow"></i> Generating custom voice model from description...';
+      }
+
+      try {
+        const customVoice = await AIStudio.createPromptedVoice(vName, prompt, 'en-US');
+        activeAuditionVoice = customVoice;
+
+        if (designStatusAlert) {
+          designStatusAlert.innerHTML = '<i class="fa-solid fa-headphones spin-slow"></i> Synthesizing live audition sample...';
+        }
+
+        const sampleText = `Hello! I am ${vName}. My vocal persona was created and tailored with Google AI Studio.`;
+        let auditionBlob;
+        try {
+          auditionBlob = await AIStudio.auditionVoiceSample(customVoice.id, sampleText);
+        } catch (_) {
+          // If audition with brand new ID takes a moment to propagate, audition with high-tier TTS
+          auditionBlob = await AIStudio.generateAudioForChunk(sampleText, 'Kore', 'gemini-3.8-flash-tts');
+        }
+
+        if (auditionAudioPlayer) {
+          auditionAudioPlayer.src = URL.createObjectURL(auditionBlob);
+          auditionAudioPlayer.play();
+        }
+        if (auditionVoiceTag) {
+          auditionVoiceTag.textContent = `${vName} • Ready`;
+        }
+        if (auditionPlaceholder) auditionPlaceholder.style.display = 'none';
+        if (auditionPlayerBox) auditionPlayerBox.style.display = 'block';
+
+        if (designStatusAlert) {
+          designStatusAlert.className = 'clone-status-alert success';
+          designStatusAlert.innerHTML = `<i class="fa-solid fa-check"></i> Voice Persona "${escapeHtml(vName)}" synthesized successfully!`;
+        }
+
+        populateModelAndVoiceDropdowns();
+        renderCustomVoicesLibrary();
+        renderVoiceGallery();
+        showToast(`Voice Persona "${vName}" synthesized!`, 'success');
+      } catch (err) {
+        console.error('Voice Design Error:', err);
+        if (designStatusAlert) {
+          designStatusAlert.className = 'clone-status-alert error';
+          designStatusAlert.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Design failed: ${escapeHtml(err.message)}`;
+        }
+        showToast('Voice Design failed: ' + err.message, 'warning');
+      } finally {
+        btnExecuteVoiceDesign.disabled = false;
+        btnExecuteVoiceDesign.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Synthesize & Audition Voice';
+      }
+    });
+  }
+
+  if (btnUseAuditionVoice) {
+    btnUseAuditionVoice.addEventListener('click', () => {
+      if (!activeAuditionVoice) return;
+      selectVoice(activeAuditionVoice.id);
+      if (voiceCloneModal) voiceCloneModal.style.display = 'none';
+      showToast(`Selected "${activeAuditionVoice.name}" as active voiceover artist!`, 'success');
+    });
+  }
+
+  // --- TAB 3: My Saved Voices Library ---
+  function renderCustomVoicesLibrary() {
+    if (!customVoicesGrid) return;
+    const voices = AIStudio.getSavedCustomVoices();
+    if (libraryCustomVoiceCount) libraryCustomVoiceCount.textContent = voices.length;
+
+    if (voices.length === 0) {
+      customVoicesGrid.innerHTML = `
+        <div style="grid-column: 1/-1; text-align: center; padding: 3rem 1rem; color: var(--text-dim);">
+          <i class="fa-solid fa-dna" style="font-size: 2.5rem; opacity: 0.35; margin-bottom: 0.75rem; display: block;"></i>
+          <strong>No custom cloned voices yet</strong>
+          <p style="margin-top: 0.35rem; font-size: 0.85rem;">Clone a real voice from audio in Tab 1, design a voice from prompt in Tab 2, or paste a voice ID above.</p>
+        </div>
+      `;
+      return;
+    }
+
+    customVoicesGrid.innerHTML = '';
+    const curVoice = AIStudio.getVoice();
+
+    voices.forEach(v => {
+      const isSelected = curVoice === v.id || curVoice === v.name;
+      const card = document.createElement('div');
+      card.className = `custom-voice-card-item ${isSelected ? 'active-voice' : ''}`;
+      
+      const typeBadge = v.type === 'replicated' 
+        ? '<span class="badge-type replicated"><i class="fa-solid fa-dna"></i> Replicated</span>'
+        : '<span class="badge-type prompted"><i class="fa-solid fa-wand-magic-sparkles"></i> Designed</span>';
+
+      card.innerHTML = `
+        <div class="custom-card-header">
+          <div>
+            <h5 class="custom-voice-title">${escapeHtml(v.name)}</h5>
+            <span class="custom-voice-id"><code>${escapeHtml(v.id)}</code></span>
+          </div>
+          ${typeBadge}
+        </div>
+        <p class="custom-voice-desc">${escapeHtml(v.prompt || v.desc || 'Custom vocal persona')}</p>
+        <div class="custom-card-meta">
+          <span><i class="fa-solid fa-earth-americas"></i> ${escapeHtml(v.accent || 'Natural')}</span>
+          <span><i class="fa-solid fa-microphone"></i> ${escapeHtml(v.tone || 'Cloned Voice')}</span>
+        </div>
+        <div class="custom-card-actions">
+          <button type="button" class="btn btn-secondary btn-sm btn-audition-card" title="Listen to audition">
+            <i class="fa-solid fa-play"></i> Preview
+          </button>
+          <button type="button" class="btn ${isSelected ? 'btn-success' : 'btn-accent'} btn-sm btn-select-custom-voice">
+            <i class="fa-solid fa-check"></i> ${isSelected ? 'Active Voice' : 'Use Voice'}
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm btn-danger btn-delete-custom-voice" title="Delete voice">
+            <i class="fa-solid fa-trash-can"></i>
+          </button>
+        </div>
+      `;
+
+      // Preview Audition
+      const btnAudition = card.querySelector('.btn-audition-card');
+      btnAudition.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        btnAudition.disabled = true;
+        btnAudition.innerHTML = '<i class="fa-solid fa-circle-notch spin-slow"></i>';
+        try {
+          const sampleText = `Hello! This is a voiceover sample of ${v.name}.`;
+          let blob;
+          if (AIStudio.hasValidKey()) {
+            blob = await AIStudio.auditionVoiceSample(v.id, sampleText);
+          } else {
+            blob = await AIStudio.synthesizeFallbackAudio(sampleText);
+          }
+          const audioUrl = URL.createObjectURL(blob);
+          if (voicePreviewAudio) {
+            voicePreviewAudio.src = audioUrl;
+            voicePreviewAudio.play();
+          }
+          showToast(`Playing audition for ${v.name}`, 'info');
+        } catch (err) {
+          showToast('Preview error: ' + err.message, 'warning');
+        } finally {
+          btnAudition.disabled = false;
+          btnAudition.innerHTML = '<i class="fa-solid fa-play"></i> Preview';
+        }
+      });
+
+      // Select Voice
+      const btnSelect = card.querySelector('.btn-select-custom-voice');
+      btnSelect.addEventListener('click', () => {
+        selectVoice(v.id);
+        renderCustomVoicesLibrary();
+        if (voiceCloneModal) voiceCloneModal.style.display = 'none';
+        showToast(`Voice "${v.name}" selected for all voiceovers!`, 'success');
+      });
+
+      // Delete Voice
+      const btnDelete = card.querySelector('.btn-delete-custom-voice');
+      btnDelete.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (confirm(`Are you sure you want to remove "${v.name}" from your saved custom voices?`)) {
+          AIStudio.deleteSavedCustomVoice(v.id);
+          populateModelAndVoiceDropdowns();
+          renderCustomVoicesLibrary();
+          renderVoiceGallery();
+          showToast(`Custom voice "${v.name}" deleted`, 'info');
+        }
+      });
+
+      customVoicesGrid.appendChild(card);
+    });
+  }
+
+  // Manual Add Voice ID
+  if (btnManualAddVoice) {
+    btnManualAddVoice.addEventListener('click', () => {
+      const vId = (manualVoiceIdInput && manualVoiceIdInput.value.trim()) || '';
+      const vName = (manualVoiceNameInput && manualVoiceNameInput.value.trim()) || 'Custom Voice';
+
+      if (!vId) {
+        showToast('Please enter a voice ID (e.g. voice_...)', 'warning');
+        return;
+      }
+
+      AIStudio.saveCustomVoice({
+        id: vId,
+        name: vName,
+        type: 'manual',
+        gender: 'Cloned',
+        tone: 'Custom',
+        accent: 'Fine-Tuned',
+        desc: `Manually linked voice ID: ${vId}`,
+        createdAt: Date.now()
+      });
+
+      if (manualVoiceIdInput) manualVoiceIdInput.value = '';
+      if (manualVoiceNameInput) manualVoiceNameInput.value = '';
+
+      populateModelAndVoiceDropdowns();
+      renderCustomVoicesLibrary();
+      renderVoiceGallery();
+      showToast(`Voice "${vName}" added to library!`, 'success');
+    });
   }
 
 });

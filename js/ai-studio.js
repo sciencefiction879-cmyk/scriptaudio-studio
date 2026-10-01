@@ -203,6 +203,25 @@ const AIStudio = {
     if (typeof window !== 'undefined' && window.AI_STUDIO_VOICES_CATALOG && this.VOICES.length < window.AI_STUDIO_VOICES_CATALOG.length) {
       this.VOICES = window.AI_STUDIO_VOICES_CATALOG;
     }
+    // Automatically merge persistent custom / cloned voices
+    try {
+      const customVoices = this.getSavedCustomVoices();
+      for (const cv of customVoices) {
+        if (!this.VOICES.some(v => v.id === cv.id)) {
+          this.VOICES.unshift({
+            id: cv.id,
+            name: cv.name,
+            gender: cv.gender || 'Cloned',
+            tone: cv.tone || 'Cloned Voice',
+            accent: cv.accent || 'Speaker Match',
+            persona: cv.type === 'replicated' ? 'Cloned Voice' : 'Custom Design',
+            desc: cv.prompt || cv.desc || 'Custom vocal persona',
+            isCustom: true,
+            isFeatured: true
+          });
+        }
+      }
+    } catch (_) {}
     return this.VOICES;
   },
 
@@ -256,7 +275,253 @@ const AIStudio = {
         newCount++;
       }
     });
-    return newCount;
+  },
+
+  // =========================================================================
+  // VOICE CLONING & VOICE DESIGN ENGINE (Gemini Voices API)
+  // =========================================================================
+
+  STORAGE_KEY_CUSTOM_VOICES: 'scriptaudio_custom_voices',
+
+  getSavedCustomVoices() {
+    try {
+      const raw = localStorage.getItem(this.STORAGE_KEY_CUSTOM_VOICES);
+      return raw ? JSON.parse(raw) : [];
+    } catch (_) {
+      return [];
+    }
+  },
+
+  saveCustomVoice(voiceObj) {
+    const list = this.getSavedCustomVoices();
+    const existingIdx = list.findIndex(v => v.id === voiceObj.id);
+    if (existingIdx >= 0) {
+      list[existingIdx] = voiceObj;
+    } else {
+      list.unshift(voiceObj);
+    }
+    localStorage.setItem(this.STORAGE_KEY_CUSTOM_VOICES, JSON.stringify(list));
+    
+    // Also inject into active VOICES catalog so it appears in gallery
+    const inCatalog = this.VOICES.find(v => v.id === voiceObj.id);
+    if (!inCatalog) {
+      this.VOICES.unshift({
+        id: voiceObj.id,
+        name: voiceObj.name,
+        gender: voiceObj.gender || 'Custom',
+        tone: voiceObj.tone || 'Cloned Voice',
+        accent: voiceObj.accent || 'Speaker Match',
+        persona: voiceObj.type === 'replicated' ? 'Cloned Voice' : 'Custom Design',
+        desc: voiceObj.prompt || voiceObj.desc || 'Custom cloned vocal persona',
+        isCustom: true,
+        isFeatured: true
+      });
+    }
+    return list;
+  },
+
+  deleteSavedCustomVoice(voiceId) {
+    const list = this.getSavedCustomVoices().filter(v => v.id !== voiceId);
+    localStorage.setItem(this.STORAGE_KEY_CUSTOM_VOICES, JSON.stringify(list));
+    this.VOICES = this.VOICES.filter(v => v.id !== voiceId);
+    return list;
+  },
+
+  /**
+   * 1. Create a Prompted Custom Voice (Voice Design)
+   * Creates a persistent voice from natural-language description.
+   */
+  async createPromptedVoice(displayName, promptText, languageCode = 'en-US', apiKey = '') {
+    const key = apiKey || this.getActiveApiKey();
+    if (!key) throw new Error('API Key is missing. Please configure an API key in Settings.');
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/voices?key=${encodeURIComponent(key)}`;
+    const payload = {
+      store: true,
+      voice: {
+        displayName: displayName || 'Custom Voice',
+        type: 'VOICE_TYPE_PROMPTED',
+        prompt: promptText,
+        languageCode: languageCode || 'en-US'
+      }
+    };
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error?.message || `HTTP ${res.status}: Failed to create prompted voice`);
+    }
+
+    const voiceData = data.voice || data;
+    const voiceId = voiceData.name || voiceData.id || `voice_${Date.now()}`;
+    const customVoice = {
+      id: voiceId,
+      name: displayName || 'Custom Voice',
+      type: 'prompted',
+      prompt: promptText,
+      gender: /female|woman|girl|lady/i.test(promptText) ? 'Female' : (/male|man|boy|gentleman/i.test(promptText) ? 'Male' : 'Neutral'),
+      tone: 'Custom Design',
+      accent: /british/i.test(promptText) ? 'British' : (/pakistani|urdu/i.test(promptText) ? 'Pakistani' : (/indian|hindi/i.test(promptText) ? 'Indian' : 'General American')),
+      language: languageCode,
+      createdAt: Date.now()
+    };
+
+    this.saveCustomVoice(customVoice);
+    return customVoice;
+  },
+
+  /**
+   * 2. Create a Replicated Custom Voice (Voice Cloning via Reference + Consent)
+   */
+  async createReplicatedVoice(displayName, refAudioBase64, consentAudioBase64, languageCode = 'en-US', apiKey = '') {
+    const key = apiKey || this.getActiveApiKey();
+    if (!key) throw new Error('API Key is missing. Please configure an API key in Settings.');
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/voices?key=${encodeURIComponent(key)}`;
+    const payload = {
+      store: true,
+      voice: {
+        displayName: displayName || 'Cloned Voice',
+        type: 'VOICE_TYPE_REPLICATED',
+        referenceAudio: {
+          mimeType: 'audio/wav',
+          data: refAudioBase64
+        },
+        consentAudio: {
+          mimeType: 'audio/wav',
+          data: consentAudioBase64
+        },
+        languageCode: languageCode || 'en-US'
+      }
+    };
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error?.message || `HTTP ${res.status}: Replicated Voice creation failed`);
+    }
+
+    const voiceData = data.voice || data;
+    const voiceId = voiceData.name || voiceData.id || `voice_${Date.now()}`;
+    const customVoice = {
+      id: voiceId,
+      name: displayName || 'Cloned Voice',
+      type: 'replicated',
+      gender: 'Cloned',
+      tone: 'Cloned Voice',
+      accent: 'Speaker Match',
+      language: languageCode,
+      createdAt: Date.now()
+    };
+
+    this.saveCustomVoice(customVoice);
+    return customVoice;
+  },
+
+  /**
+   * 3. Intelligent Multimodal Acoustic Analyzer & Matcher
+   * Listens to reference audio and extracts precision vocal design traits
+   */
+  async analyzeAudioAcousticProfile(audioBase64, mimeType = 'audio/wav', apiKey = '') {
+    const key = apiKey || this.getActiveApiKey();
+    if (!key) throw new Error('API Key is missing.');
+
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(key)}`;
+    const payload = {
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              inlineData: {
+                mimeType: mimeType,
+                data: audioBase64
+              }
+            },
+            {
+              text: `Listen to this audio clip and analyze the speaker's vocal characteristics in detail. 
+Output a strictly valid JSON object with these keys:
+{
+  "gender": "Male" or "Female" or "Neutral",
+  "estimatedAge": "e.g. 25-30, 40s, 60s",
+  "accent": "e.g. Pakistani English, British RP, General American, Indian English",
+  "timbre": "e.g. Deep, raspy, warm, resonant, crisp, breathy, silky",
+  "pitch": "e.g. Low pitch, medium pitch, high pitch",
+  "tempo": "e.g. Calm and deliberate, fast and energetic, natural conversational",
+  "energy": "e.g. Authoritative, empathetic, inspiring, casual",
+  "voiceDesignPrompt": "A comprehensive 25-35 word prompt describing this speaker's voice so it can be synthesized with identical timbre and cadence."
+}`
+            }
+          ]
+        }
+      ],
+      generationConfig: {
+        responseMimeType: "application/json",
+        temperature: 0.1
+      }
+    };
+
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error?.message || `HTTP ${res.status}`);
+    }
+
+    const textOutput = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!textOutput) throw new Error('No acoustic analysis generated from audio.');
+    return JSON.parse(textOutput);
+  },
+
+  /**
+   * 4. Synthesize Audition Preview for any voice (Prebuilt or Custom voice_... ID)
+   */
+  async auditionVoiceSample(voiceIdOrName, sampleText = "Hello! This is an audition preview of this voiceover artist.", apiKey = '') {
+    const key = apiKey || this.getActiveApiKey();
+    const model = 'gemini-3.8-flash-tts';
+    const isCustom = (voiceIdOrName || '').startsWith('voice_');
+
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+    const speechConfig = isCustom 
+      ? { voiceConfig: { voice: voiceIdOrName } }
+      : { voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceIdOrName } } };
+
+    const payload = {
+      contents: [{ role: "user", parts: [{ text: sampleText }] }],
+      generationConfig: {
+        responseModalities: ["AUDIO"],
+        speechConfig: speechConfig
+      }
+    };
+
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || `HTTP ${res.status}`);
+
+    const inlineData = data.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData;
+    if (inlineData && inlineData.data) {
+      return this.processAudioResponse(inlineData);
+    }
+    throw new Error('No audio data returned in audition response.');
   },
 
   /**
@@ -864,13 +1129,23 @@ const AIStudio = {
           ]
         }
       ];
-      speechConfig = {
-        voiceConfig: {
-          prebuiltVoiceConfig: {
-            voiceName: selectedVoice
+      const customVoiceObj = this.getSavedCustomVoices().find(v => v.id === selectedVoice || v.name === selectedVoice);
+      const customId = this.getPersonaId() || (customVoiceObj ? customVoiceObj.id : (selectedVoice && selectedVoice.startsWith('voice_') ? selectedVoice : null));
+      if (customId) {
+        speechConfig = {
+          voiceConfig: {
+            voice: customId
           }
-        }
-      };
+        };
+      } else {
+        speechConfig = {
+          voiceConfig: {
+            prebuiltVoiceConfig: {
+              voiceName: selectedVoice
+            }
+          }
+        };
+      }
     }
 
     // Google AI Studio Generation Parameters
@@ -982,13 +1257,24 @@ const AIStudio = {
       }
     ];
 
-    const speechConfig = {
-      voiceConfig: {
-        prebuiltVoiceConfig: {
-          voiceName: selectedVoice
+    const customVoiceObj = this.getSavedCustomVoices().find(v => v.id === selectedVoice || v.name === selectedVoice);
+    const customId = this.getPersonaId() || (customVoiceObj ? customVoiceObj.id : (selectedVoice && selectedVoice.startsWith('voice_') ? selectedVoice : null));
+    let speechConfig;
+    if (customId) {
+      speechConfig = {
+        voiceConfig: {
+          voice: customId
         }
-      }
-    };
+      };
+    } else {
+      speechConfig = {
+        voiceConfig: {
+          prebuiltVoiceConfig: {
+            voiceName: selectedVoice
+          }
+        }
+      };
+    }
 
     const generationConfig = {
       responseModalities: ["AUDIO"],
